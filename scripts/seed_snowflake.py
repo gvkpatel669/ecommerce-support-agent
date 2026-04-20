@@ -7,6 +7,7 @@ Populates 11 tables with realistic ecommerce data designed to surface 3 planted 
   3. Profit bug: Discounts and refunds ignored in revenue calc
 """
 
+import os
 import snowflake.connector
 import random
 from datetime import date, datetime, timedelta
@@ -14,11 +15,11 @@ import pytz
 
 # ── Connection ──────────────────────────────────────────────────────────────
 CONN_PARAMS = {
-    "account": "LVSAHNU-PR54555",
-    "user": "GVKPATEL2312",
-    "password": "$RFVvfr4$RFVvfr4",
-    "role": "ACCOUNTADMIN",
-    "warehouse": "COMPUTE_WH",
+    "account": os.environ.get("SNOWFLAKE_ACCOUNT", "LVSAHNU-PR54555"),
+    "user": os.environ.get("SNOWFLAKE_USER", ""),
+    "password": os.environ.get("SNOWFLAKE_PASSWORD", ""),
+    "role": os.environ.get("SNOWFLAKE_ROLE", "ACCOUNTADMIN"),
+    "warehouse": os.environ.get("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
     "database": "ECOMM_DATA_LAKE",
     "schema": "CONFORMED",
 }

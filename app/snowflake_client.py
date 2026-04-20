@@ -18,6 +18,8 @@ def _get_connection():
             warehouse=settings.SNOWFLAKE_WAREHOUSE,
             database=settings.SNOWFLAKE_DATABASE,
             schema=settings.SNOWFLAKE_SCHEMA,
+            login_timeout=10,
+            network_timeout=30,
         )
     return _connection
 
