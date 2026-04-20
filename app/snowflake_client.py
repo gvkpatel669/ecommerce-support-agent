@@ -24,7 +24,7 @@ def _get_connection():
     return _connection
 
 
-def query(sql: str, params: Optional[dict] = None) -> List[Dict]:
+def query(sql: str, params=None) -> List[Dict]:
     """Execute a SQL query and return results as a list of dicts."""
     conn = _get_connection()
     cursor = conn.cursor()

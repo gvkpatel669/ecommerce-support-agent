@@ -59,6 +59,8 @@ def calculate_profit(question: str) -> str:
         JOIN CONFORMED.DIM_PRODUCT p ON oi.product_sk = p.product_sk
         WHERE o.order_status != 'CANCELLED'
     """)
+    if not rows:
+        return "No profit data available."
     r = rows[0]
     profit = r['REVENUE'] - r['COST']
     margin = (profit / r['REVENUE'] * 100) if r['REVENUE'] > 0 else 0
