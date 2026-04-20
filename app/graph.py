@@ -71,6 +71,7 @@ def format_response_node(state: AgentState) -> AgentState:
     llm = ChatOpenAI(
         model=settings.LLM_MODEL,
         api_key=settings.LLM_API_KEY,
+        base_url=settings.LLM_BASE_URL if settings.LLM_BASE_URL else None,
         temperature=0.3,
     )
 

@@ -9,8 +9,9 @@ class Settings(BaseSettings):
     SNOWFLAKE_WAREHOUSE: str = "COMPUTE_WH"
     SNOWFLAKE_DATABASE: str = "ECOMM_DATA_LAKE"
     SNOWFLAKE_SCHEMA: str = "CONFORMED"
-    LLM_MODEL: str = "gpt-4o-mini"
+    LLM_MODEL: str = "MiniMax-Text-01"
     LLM_API_KEY: str = ""
+    LLM_BASE_URL: str = "https://api.minimaxi.chat/v1"
     APP_PORT: int = 8010
 
     class Config:
