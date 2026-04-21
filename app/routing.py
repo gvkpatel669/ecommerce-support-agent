@@ -4,7 +4,7 @@ def classify_intent(message: str) -> str:
 
     if any(w in msg for w in ["revenue", "sales", "order", "trend", "gmv", "refund"]):
         return "sales"
-    if any(w in msg for w in ["stock", "inventory", "warehouse", "available", "supply"]):
+    if any(w in msg for w in ["stock", "inventory", "warehouse", "available", "supply", "reorder", "low stock", "out of stock", "in stock", "availability"]):
         return "inventory"
     if any(w in msg for w in ["profit", "margin", "earnings", "cost", "net income"]):
         return "profit"
