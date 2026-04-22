@@ -10,7 +10,7 @@ def lookup_customer(question: str) -> str:
     q = question.lower()
 
     import re
-    id_match = re.search(r'#?(\d{1,6})', q)
+    id_match = re.search(r'#(\d{1,6})', q)
 
     if id_match:
         cid = id_match.group(1)
