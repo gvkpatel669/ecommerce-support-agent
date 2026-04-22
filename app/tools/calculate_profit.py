@@ -57,7 +57,7 @@ def calculate_profit(question: str) -> str:
         FROM CONFORMED.FACT_ORDER_ITEM oi
         JOIN CONFORMED.FACT_ORDER o ON oi.order_sk = o.order_sk
         JOIN CONFORMED.DIM_PRODUCT p ON oi.product_sk = p.product_sk
-        WHERE o.order_status != 'CANCELLED'
+        WHERE o.order_status NOT IN ('CANCELLED', 'RETURNED', 'REFUNDED')
     """)
     if not rows:
         return "No profit data available."

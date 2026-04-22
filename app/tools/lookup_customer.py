@@ -60,7 +60,7 @@ def lookup_customer(question: str) -> str:
     if any(w in q for w in ["top", "best", "most", "highest"]):
         rows = query("""
             SELECT c.customer_sk, c.customer_id, c.full_name, c.email, c.phone_number,
-                   COUNT(o.order_sk) AS order_count,
+                   COUNT(*) AS order_count,
                    SUM(o.gmv_amount) AS total_spent
             FROM CONFORMED.DIM_CUSTOMER c
             JOIN CONFORMED.FACT_ORDER o ON c.customer_sk = o.customer_sk
@@ -68,7 +68,7 @@ def lookup_customer(question: str) -> str:
             GROUP BY c.customer_sk, c.customer_id, c.full_name, c.email, c.phone_number
             ORDER BY total_spent DESC
             LIMIT 5
-        """)
+        """)  
         lines = ["Top 5 Customers by Spending:"]
         for r in rows:
             lines.append(
@@ -81,19 +81,20 @@ def lookup_customer(question: str) -> str:
     # Search by name using parameterized query
     name_words = [w for w in q.split() if len(w) > 2 and w not in
         {"customer", "buyer", "account", "info", "details", "contact",
-         "the", "for", "get", "find", "look", "who", "what", "show", "list"}]
+         "the", "for", "get", "find", "look", "who", "what", "show", "list", "name", "named", "about", "search"}]
 
     if name_words:
-        name = name_words[-1]
+        search_pattern = '%' + '%'.join(name_words) + '%'
         rows = query("""
             SELECT customer_sk, customer_id, full_name, email, phone_number
             FROM CONFORMED.DIM_CUSTOMER
-            WHERE (LOWER(full_name) LIKE %s OR customer_id LIKE %s)
+            WHERE (LOWER(full_name) LIKE %s OR LOWER(full_name) LIKE %s OR customer_id LIKE %s)
               AND is_active = TRUE
             LIMIT 10
-        """, (f"%{name}%", f"%{name}%"))
+        """, (search_pattern, '%' + ' '.join(name_words) + '%', search_pattern))
         if rows:
-            lines = [f"Customers matching '{name}':"]
+            display_name = ' '.join(name_words)
+            lines = [f"Customers matching '{display_name}':"]
             for r in rows:
                 lines.append(f"  #{r['CUSTOMER_ID']} {r['FULL_NAME']} — {r['EMAIL']}, {r['PHONE_NUMBER']}")
             return "\n".join(lines)

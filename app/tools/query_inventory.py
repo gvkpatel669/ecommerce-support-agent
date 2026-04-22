@@ -17,7 +17,6 @@ def query_inventory(question: str) -> str:
             FROM CONFORMED.FACT_INVENTORY_SNAPSHOT i
             JOIN CONFORMED.DIM_PRODUCT p ON i.product_sk = p.product_sk
             WHERE i.snapshot_date = (SELECT MAX(snapshot_date) FROM CONFORMED.FACT_INVENTORY_SNAPSHOT)
-              AND p.category_l1 != 'Electronics'
               AND i.reorder_flag = TRUE
             GROUP BY p.product_name, p.category_l1, p.brand
             ORDER BY available ASC
@@ -39,7 +38,6 @@ def query_inventory(question: str) -> str:
         FROM CONFORMED.FACT_INVENTORY_SNAPSHOT i
         JOIN CONFORMED.DIM_PRODUCT p ON i.product_sk = p.product_sk
         WHERE i.snapshot_date = (SELECT MAX(snapshot_date) FROM CONFORMED.FACT_INVENTORY_SNAPSHOT)
-          AND p.category_l1 != 'Electronics'
         GROUP BY p.category_l1
         ORDER BY total_available DESC
     """)
