@@ -39,12 +39,13 @@ def query(sql: str, params=None) -> List[Dict]:
             rows = cursor.fetchall()
             return [dict(zip(columns, row)) for row in rows]
         except Exception:
-            cursor.close()
             if attempt == 0:
                 # Force reconnect on first failure (handles expired tokens)
                 _connection = None
                 continue
             raise
         finally:
-            if not cursor.is_closed():
+            try:
                 cursor.close()
+            except Exception:
+                pass
