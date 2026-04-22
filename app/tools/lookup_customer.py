@@ -62,19 +62,17 @@ def lookup_customer(question: str) -> str:
     if any(w in q for w in ["top", "best", "most", "highest"]):
         rows = query("""
             SELECT c.customer_sk, c.customer_id, c.full_name, c.email, c.phone_number,
-                   COUNT(o.order_sk) AS order_count
+                   COUNT(o.order_sk) AS order_count, SUM(o.gmv_amount) AS total_spent
             FROM CONFORMED.DIM_CUSTOMER c
             LEFT JOIN CONFORMED.FACT_ORDER o ON c.customer_sk = o.customer_sk AND o.order_status != 'CANCELLED'
             WHERE c.is_active = TRUE
             GROUP BY c.customer_sk, c.customer_id, c.full_name, c.email, c.phone_number
             HAVING COUNT(o.order_sk) > 0
-            ORDER BY SUM(o.gmv_amount) DESC
+            ORDER BY total_spent DESC
             LIMIT 5
         """)
-        # Calculate total_spent in Python to ensure all customers have spending
-        for r in rows:
-            spending = query("SELECT SUM(gmv_amount) AS total FROM CONFORMED.FACT_ORDER WHERE customer_sk = %s AND order_status != 'CANCELLED'", (r['CUSTOMER_SK'],))
-            r['TOTAL_SPENT'] = spending[0]['TOTAL'] if spending and spending[0]['TOTAL'] else 0
+        if not rows:
+            return "No customers with orders found."
         lines = ["Top 5 Customers by Spending:"]
         for r in rows:
             lines.append(

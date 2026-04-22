@@ -8,6 +8,7 @@ def query_sales(question: str) -> str:
     """Query sales data including revenue, orders, and trends.
     Use this for questions about revenue, sales, orders, GMV, and trends."""
     q = question.lower()
+    includes_returns = any(w in q for w in ['return', 'refund', 'returned', 'refunded', 'refunds', 'returns'])
 
     # Determine time period
     period_filter = ""
@@ -25,6 +26,19 @@ def query_sales(question: str) -> str:
         period_filter = "AND o.order_placed_at >= '2026-04-01' AND o.order_placed_at < '2026-07-01'"
     else:
         period_filter = "AND o.order_placed_at::DATE >= DATEADD(day, -30, CURRENT_DATE())"
+
+    # Get returns data if requested
+    total_returns = 0
+    return_count = 0
+    if includes_returns:
+        return_rows = query(f"""
+            SELECT COUNT(*) AS return_count, COALESCE(SUM(gmv_amount), 0) AS total_returns
+            FROM CONFORMED.FACT_ORDER
+            WHERE order_status IN ('RETURNED', 'REFUNDED') {period_filter.replace('o.', '')}
+        """)
+        if return_rows:
+            return_count = return_rows[0].get('RETURN_COUNT', 0)
+            total_returns = return_rows[0].get('TOTAL_RETURNS', 0)
 
     # Summary
     rows = query(f"""
