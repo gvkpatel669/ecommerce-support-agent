@@ -84,7 +84,7 @@ def lookup_customer(question: str) -> str:
          "the", "for", "get", "find", "look", "who", "what", "show", "list"}]
 
     if name_words:
-        name = name_words[-1]
+        name = name_words[0]
         rows = query("""
             SELECT customer_sk, customer_id, full_name, email, phone_number
             FROM CONFORMED.DIM_CUSTOMER
@@ -93,7 +93,7 @@ def lookup_customer(question: str) -> str:
             LIMIT 10
         """, (f"%{name}%", f"%{name}%"))
         if rows:
-            lines = [f"Customers matching '{name}':"]
+            lines = [f"Customers matching '{' '.join(name_words)}':"]
             for r in rows:
                 lines.append(f"  #{r['CUSTOMER_ID']} {r['FULL_NAME']} — {r['EMAIL']}, {r['PHONE_NUMBER']}")
             return "\n".join(lines)
