@@ -1,4 +1,5 @@
 from langchain_core.tools import tool
+import re
 
 from app.snowflake_client import query
 
@@ -55,11 +56,13 @@ def calculate_profit(question: str) -> str:
     # Default: overall
     rows = query("""
         SELECT SUM(oi.unit_selling_price * oi.quantity) AS revenue,
-               SUM(p.cost_price * oi.quantity) AS cost
+               SUM(p.cost_price * oi.quantity) AS cost,
+               COALESCE(SUM(r.refund_amount), 0) AS refunds
         FROM CONFORMED.FACT_ORDER_ITEM oi
         JOIN CONFORMED.FACT_ORDER o ON oi.order_sk = o.order_sk
         JOIN CONFORMED.DIM_PRODUCT p ON oi.product_sk = p.product_sk
-        WHERE o.order_status NOT IN ('CANCELLED', 'RETURNED', 'REFUNDED')
+        LEFT JOIN CONFORMED.FACT_REFUND r ON oi.order_sk = r.order_sk
+        WHERE o.order_status NOT IN ('CANCELLED', 'RETURNED', 'REFUNDED', 'REFUND_PENDING')
     """)
     if not rows:
         return "No profit data available."
@@ -69,6 +72,6 @@ def calculate_profit(question: str) -> str:
     return (f"Profit Summary:\n"
             f"  Total Revenue: ₹{r['REVENUE']:,.2f}\n"
             f"  Total Cost: ₹{r['COST']:,.2f}\n"
-            f"  Gross Profit: ₹{profit:,.2f}\n"
+            f"  Net Profit: ₹{profit:,.2f}\n"
             f"  Margin: {margin:.1f}%\n"
-            f"  Note: Calculated as revenue minus cost of goods.")
+            f"  Note: Calculated as revenue minus cost minus refunds.")

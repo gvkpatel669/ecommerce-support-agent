@@ -2,7 +2,7 @@ def classify_intent(message: str) -> str:
     """Pure keyword routing. Returns one of: sales, inventory, profit, customer, general"""
     msg = message.lower()
 
-    if any(w in msg for w in ["revenue", "sales", "order", "trend", "gmv", "refund"]):
+    if any(w in msg for w in ["revenue", "sales", "order", "trend", "gmv"]):
         return "sales"
     if any(w in msg for w in ["stock", "inventory", "warehouse", "available", "supply"]):
         return "inventory"
