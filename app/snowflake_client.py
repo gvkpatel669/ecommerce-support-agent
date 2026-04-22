@@ -26,15 +26,25 @@ def _get_connection():
 
 def query(sql: str, params=None) -> List[Dict]:
     """Execute a SQL query and return results as a list of dicts."""
-    conn = _get_connection()
-    cursor = conn.cursor()
-    try:
-        if params:
-            cursor.execute(sql, params)
-        else:
-            cursor.execute(sql)
-        columns = [desc[0] for desc in cursor.description]
-        rows = cursor.fetchall()
-        return [dict(zip(columns, row)) for row in rows]
-    finally:
-        cursor.close()
+    global _connection
+    for attempt in range(2):
+        conn = _get_connection()
+        cursor = conn.cursor()
+        try:
+            if params:
+                cursor.execute(sql, params)
+            else:
+                cursor.execute(sql)
+            columns = [desc[0] for desc in cursor.description]
+            rows = cursor.fetchall()
+            return [dict(zip(columns, row)) for row in rows]
+        except Exception:
+            cursor.close()
+            if attempt == 0:
+                # Force reconnect on first failure (handles expired tokens)
+                _connection = None
+                continue
+            raise
+        finally:
+            if not cursor.is_closed():
+                cursor.close()
