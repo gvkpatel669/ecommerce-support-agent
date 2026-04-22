@@ -37,7 +37,7 @@ def query_sales(question: str) -> str:
             MIN(order_placed_at::DATE) AS period_start,
             MAX(order_placed_at::DATE) AS period_end
         FROM CONFORMED.FACT_ORDER o
-        WHERE o.order_status != 'CANCELLED' {period_filter}
+        WHERE o.order_status NOT IN ('CANCELLED', 'RETURNED', 'REFUNDED') {period_filter}
     """)
 
     if not rows or rows[0].get("TOTAL_ORDERS", 0) == 0:
@@ -63,6 +63,7 @@ def query_sales(question: str) -> str:
         JOIN CONFORMED.DIM_PRODUCT p ON oi.product_sk = p.product_sk
         JOIN CONFORMED.FACT_ORDER o ON oi.order_sk = o.order_sk
         WHERE o.order_status != 'CANCELLED' {period_filter}
+        WHERE o.order_status NOT IN ('CANCELLED', 'RETURNED', 'REFUNDED') {period_filter}
         GROUP BY p.category_l1
         ORDER BY revenue DESC
         LIMIT 5
