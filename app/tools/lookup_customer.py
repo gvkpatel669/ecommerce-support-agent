@@ -65,6 +65,7 @@ def lookup_customer(question: str) -> str:
             FROM CONFORMED.DIM_CUSTOMER c
             JOIN CONFORMED.FACT_ORDER o ON c.customer_sk = o.customer_sk
             WHERE c.is_active = TRUE AND o.order_status != 'CANCELLED'
+              AND o.order_placed_at >= CURRENT_DATE - INTERVAL '30 days'
             GROUP BY c.customer_sk, c.customer_id, c.full_name, c.email, c.phone_number
             ORDER BY total_spent DESC
             LIMIT 5
@@ -93,7 +94,7 @@ def lookup_customer(question: str) -> str:
             LIMIT 10
         """, (f"%{name}%", f"%{name}%"))
         if rows:
-            lines = [f"Customers matching '{name}':"]
+            lines = [f"Customers matching '{' '.join(name_words)}':"]
             for r in rows:
                 lines.append(f"  #{r['CUSTOMER_ID']} {r['FULL_NAME']} — {r['EMAIL']}, {r['PHONE_NUMBER']}")
             return "\n".join(lines)
