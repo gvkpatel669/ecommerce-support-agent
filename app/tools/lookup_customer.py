@@ -71,7 +71,7 @@ def lookup_customer(question: str) -> str:
             LIMIT 5
         """)
         lines = ["Top 5 Customers by Spending:"]
-        for r in rows:
+        for idx, r in enumerate(rows):
             lines.append(
                 f"  #{r['CUSTOMER_ID']} {r['FULL_NAME']} "
                 f"(email: {r['EMAIL']}, phone: {r['PHONE_NUMBER']}): "
@@ -85,14 +85,14 @@ def lookup_customer(question: str) -> str:
          "the", "for", "get", "find", "look", "who", "what", "show", "list"}]
 
     if name_words:
-        name = name_words[-1]
+        name = ' '.join(name_words)
         rows = query("""
             SELECT customer_sk, customer_id, full_name, email, phone_number
             FROM CONFORMED.DIM_CUSTOMER
             WHERE (LOWER(full_name) LIKE %s OR customer_id LIKE %s)
               AND is_active = TRUE
             LIMIT 10
-        """, (f"%{name}%", f"%{name}%"))
+        """, (f"%{name}%".lower(), f"%{name}%"))
         if rows:
             lines = [f"Customers matching '{' '.join(name_words)}':"]
             for r in rows:
