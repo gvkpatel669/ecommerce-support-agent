@@ -33,12 +33,14 @@ def lookup_customer(question: str) -> str:
             return f"No customer found with ID {cid}."
 
         c = rows[0]
-        result = (f"Customer #{c.get('CUSTOMER_ID', c.get('CUSTOMER_SK', '?'))}:\n"
+        result = (f"Customer #{c.get('CUSTOMER_ID', c.get('CUSTOMER_SK', '?'))} "
+                  f"(SK:{c.get('CUSTOMER_SK', 'N/A')})\n"
                   f"  Name: {c.get('FULL_NAME', 'N/A')}\n"
                   f"  Email: {c.get('EMAIL', 'N/A')}\n"
                   f"  Phone: {c.get('PHONE_NUMBER', 'N/A')}\n"
                   f"  DOB: {c.get('DATE_OF_BIRTH', 'N/A')}\n"
-                  f"  Location: {c.get('CITY', '')}, {c.get('STATE_CODE', '')} {c.get('PINCODE', '')}\n"
+                  f"  Location: {c.get('CITY', 'N/A')}, {c.get('STATE_CODE', '')} {c.get('PINCODE', '')}\n"
+                  f"  Customer Since: {c.get('FIRST_ORDER_DATE', 'N/A')}\n"
                   f"  Loyalty: {c.get('LOYALTY_TIER', 'N/A')} ({c.get('LOYALTY_POINTS', 0):,.0f} pts)\n"
                   f"  Segment: {c.get('CUSTOMER_SEGMENT', 'N/A')}\n")
 
@@ -60,19 +62,23 @@ def lookup_customer(question: str) -> str:
     if any(w in q for w in ["top", "best", "most", "highest"]):
         rows = query("""
             SELECT c.customer_sk, c.customer_id, c.full_name, c.email, c.phone_number,
-                   COUNT(o.order_sk) AS order_count,
-                   SUM(o.gmv_amount) AS total_spent
+                   COUNT(o.order_sk) AS order_count
             FROM CONFORMED.DIM_CUSTOMER c
-            JOIN CONFORMED.FACT_ORDER o ON c.customer_sk = o.customer_sk
-            WHERE c.is_active = TRUE AND o.order_status != 'CANCELLED'
+            LEFT JOIN CONFORMED.FACT_ORDER o ON c.customer_sk = o.customer_sk AND o.order_status != 'CANCELLED'
+            WHERE c.is_active = TRUE
             GROUP BY c.customer_sk, c.customer_id, c.full_name, c.email, c.phone_number
-            ORDER BY total_spent DESC
+            HAVING COUNT(o.order_sk) > 0
+            ORDER BY SUM(o.gmv_amount) DESC
             LIMIT 5
         """)
+        # Calculate total_spent in Python to ensure all customers have spending
+        for r in rows:
+            spending = query("SELECT SUM(gmv_amount) AS total FROM CONFORMED.FACT_ORDER WHERE customer_sk = %s AND order_status != 'CANCELLED'", (r['CUSTOMER_SK'],))
+            r['TOTAL_SPENT'] = spending[0]['TOTAL'] if spending and spending[0]['TOTAL'] else 0
         lines = ["Top 5 Customers by Spending:"]
         for r in rows:
             lines.append(
-                f"  #{r['CUSTOMER_ID']} {r['FULL_NAME']} "
+                f"  #{r['CUSTOMER_ID']} (SK:{r['CUSTOMER_SK']}) {r['FULL_NAME']} "
                 f"(email: {r['EMAIL']}, phone: {r['PHONE_NUMBER']}): "
                 f"{r['ORDER_COUNT']} orders, ₹{r['TOTAL_SPENT']:,.2f}"
             )
