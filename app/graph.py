@@ -2,6 +2,8 @@ from typing import TypedDict
 
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
+from snowflake.connector.errors import Error as SnowflakeError
+from snowflake.connector.errors import BadAuthenticationError
 
 from app.config import settings
 from app.prompts import SYSTEM_PROMPT
@@ -52,11 +54,24 @@ def execute_tool_node(state: AgentState) -> AgentState:
     if tool is None:
         return {**state, "tool_output": "No tool available for this intent."}
 
-    try:
-        result = tool.invoke(last_message)
-        return {**state, "tool_output": str(result)}
-    except Exception as e:
-        return {**state, "tool_output": f"Error querying data: {str(e)}"}
+    # Import here to avoid circular imports
+    from app.snowflake_client import _invalidate_connection
+    
+    max_retries = 2
+    last_error = None
+    
+    for attempt in range(max_retries):
+        try:
+            result = tool.invoke(last_message)
+            return {**state, "tool_output": str(result)}
+        except (SnowflakeError, BadAuthenticationError) as e:
+            last_error = e
+            if attempt < max_retries - 1 and e.errno in (390114, 390112):
+                _invalidate_connection()
+                continue
+            return {**state, "tool_output": f"Error querying data: {str(e)}"}
+        except Exception as e:
+            return {**state, "tool_output": f"Error querying data: {str(e)}"}
 
 
 def format_response_node(state: AgentState) -> AgentState:
