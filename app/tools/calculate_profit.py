@@ -19,7 +19,7 @@ def calculate_profit(question: str) -> str:
             JOIN CONFORMED.FACT_ORDER o ON oi.order_sk = o.order_sk
             JOIN CONFORMED.DIM_PRODUCT p ON oi.product_sk = p.product_sk
             WHERE o.order_placed_at >= '2026-01-01' AND o.order_placed_at < '2026-07-01'
-              AND o.order_status != 'CANCELLED'
+              AND o.order_status NOT IN ('CANCELLED', 'RETURNED')
             GROUP BY quarter
             ORDER BY quarter
         """)
@@ -39,7 +39,7 @@ def calculate_profit(question: str) -> str:
             FROM CONFORMED.FACT_ORDER_ITEM oi
             JOIN CONFORMED.FACT_ORDER o ON oi.order_sk = o.order_sk
             JOIN CONFORMED.DIM_PRODUCT p ON oi.product_sk = p.product_sk
-            WHERE o.order_status != 'CANCELLED'
+            WHERE o.order_status NOT IN ('CANCELLED', 'RETURNED')
             GROUP BY p.category_l1
             ORDER BY revenue DESC
         """)
@@ -57,7 +57,7 @@ def calculate_profit(question: str) -> str:
         FROM CONFORMED.FACT_ORDER_ITEM oi
         JOIN CONFORMED.FACT_ORDER o ON oi.order_sk = o.order_sk
         JOIN CONFORMED.DIM_PRODUCT p ON oi.product_sk = p.product_sk
-        WHERE o.order_status != 'CANCELLED'
+        WHERE o.order_status NOT IN ('CANCELLED', 'RETURNED')
     """)
     if not rows:
         return "No profit data available."
