@@ -35,6 +35,7 @@ def lookup_customer(question: str) -> str:
         c = rows[0]
         result = (f"Customer #{c.get('CUSTOMER_ID', c.get('CUSTOMER_SK', '?'))} "
                   f"(SK:{c.get('CUSTOMER_SK', 'N/A')})\n"
+                  f"  Customer ID: {c.get('CUSTOMER_ID', 'N/A')}\n"
                   f"  Name: {c.get('FULL_NAME', 'N/A')}\n"
                   f"  Email: {c.get('EMAIL', 'N/A')}\n"
                   f"  Phone: {c.get('PHONE_NUMBER', 'N/A')}\n"
