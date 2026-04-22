@@ -60,7 +60,7 @@ def lookup_customer(question: str) -> str:
     if any(w in q for w in ["top", "best", "most", "highest"]):
         rows = query("""
             SELECT c.customer_sk, c.customer_id, c.full_name, c.email, c.phone_number,
-                   COUNT(o.order_sk) AS order_count,
+                   COUNT(DISTINCT o.order_sk) AS order_count,
                    SUM(o.gmv_amount) AS total_spent
             FROM CONFORMED.DIM_CUSTOMER c
             JOIN CONFORMED.FACT_ORDER o ON c.customer_sk = o.customer_sk
@@ -73,8 +73,8 @@ def lookup_customer(question: str) -> str:
         for r in rows:
             lines.append(
                 f"  #{r['CUSTOMER_ID']} {r['FULL_NAME']} "
-                f"(email: {r['EMAIL']}, phone: {r['PHONE_NUMBER']}): "
                 f"{r['ORDER_COUNT']} orders, ₹{r['TOTAL_SPENT']:,.2f}"
+                f" (email: {r['EMAIL']}, phone: {r['PHONE_NUMBER']})"
             )
         return "\n".join(lines)
 

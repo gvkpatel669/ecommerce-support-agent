@@ -13,13 +13,15 @@ def calculate_profit(question: str) -> str:
         rows = query("""
             SELECT
                 CASE WHEN QUARTER(o.order_placed_at) = 1 THEN 'Q1' ELSE 'Q2' END AS quarter,
-                SUM(oi.unit_selling_price * oi.quantity) AS revenue,
-                SUM(p.cost_price * oi.quantity) AS cost
+                SUM(oi.unit_selling_price * oi.quantity) AS gross_revenue,
+                SUM(p.cost_price * oi.quantity) AS cost,
+                COALESCE(SUM(r.refund_amount), 0) AS refunds
             FROM CONFORMED.FACT_ORDER_ITEM oi
             JOIN CONFORMED.FACT_ORDER o ON oi.order_sk = o.order_sk
             JOIN CONFORMED.DIM_PRODUCT p ON oi.product_sk = p.product_sk
+            LEFT JOIN CONFORMED.FACT_REFUND r ON oi.order_sk = r.order_sk
             WHERE o.order_placed_at >= '2026-01-01' AND o.order_placed_at < '2026-07-01'
-              AND o.order_status NOT IN ('CANCELLED', 'RETURNED', 'REFUNDED')
+              AND o.order_status != 'CANCELLED'
             GROUP BY quarter
             ORDER BY quarter
         """)
