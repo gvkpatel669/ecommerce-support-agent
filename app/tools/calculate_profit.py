@@ -13,14 +13,22 @@ def calculate_profit(question: str) -> str:
         rows = query("""
             SELECT
                 CASE WHEN QUARTER(o.order_placed_at) = 1 THEN 'Q1' ELSE 'Q2' END AS quarter,
-                SUM(oi.unit_selling_price * oi.quantity) AS revenue,
-                SUM(p.cost_price * oi.quantity) AS cost
+                SUM(oi.unit_selling_price * oi.quantity) - COALESCE(ret.returns_value, 0) AS revenue,
+                SUM(p.cost_price * oi.quantity) - COALESCE(ret.returns_cost, 0) AS cost
             FROM CONFORMED.FACT_ORDER_ITEM oi
             JOIN CONFORMED.FACT_ORDER o ON oi.order_sk = o.order_sk
             JOIN CONFORMED.DIM_PRODUCT p ON oi.product_sk = p.product_sk
+            LEFT JOIN (
+                SELECT order_sk,
+                       SUM(return_amount) AS returns_value,
+                       SUM(return_cost) AS returns_cost
+                FROM CONFORMED.FACT_ORDER_RETURN
+                WHERE return_status != 'REJECTED'
+                GROUP BY order_sk
+            ) ret ON o.order_sk = ret.order_sk
             WHERE o.order_placed_at >= '2026-01-01' AND o.order_placed_at < '2026-07-01'
               AND o.order_status != 'CANCELLED'
-            GROUP BY quarter
+            GROUP BY quarter, ret.returns_value, ret.returns_cost
             ORDER BY quarter
         """)
         # Profit = revenue - cost
@@ -34,13 +42,21 @@ def calculate_profit(question: str) -> str:
     if any(w in q for w in ["category", "categories", "breakdown"]):
         rows = query("""
             SELECT p.category_l1,
-                   SUM(oi.unit_selling_price * oi.quantity) AS revenue,
-                   SUM(p.cost_price * oi.quantity) AS cost
+                   SUM(oi.unit_selling_price * oi.quantity) - COALESCE(ret.returns_value, 0) AS revenue,
+                   SUM(p.cost_price * oi.quantity) - COALESCE(ret.returns_cost, 0) AS cost
             FROM CONFORMED.FACT_ORDER_ITEM oi
             JOIN CONFORMED.FACT_ORDER o ON oi.order_sk = o.order_sk
             JOIN CONFORMED.DIM_PRODUCT p ON oi.product_sk = p.product_sk
+            LEFT JOIN (
+                SELECT r.order_sk,
+                       SUM(r.return_amount) AS returns_value,
+                       SUM(r.return_cost) AS returns_cost
+                FROM CONFORMED.FACT_ORDER_RETURN r
+                WHERE r.return_status != 'REJECTED'
+                GROUP BY r.order_sk
+            ) ret ON o.order_sk = ret.order_sk
             WHERE o.order_status != 'CANCELLED'
-            GROUP BY p.category_l1
+            GROUP BY p.category_l1, ret.returns_value, ret.returns_cost
             ORDER BY revenue DESC
         """)
         lines = ["Profit by Category:"]
@@ -52,11 +68,19 @@ def calculate_profit(question: str) -> str:
 
     # Default: overall
     rows = query("""
-        SELECT SUM(oi.unit_selling_price * oi.quantity) AS revenue,
-               SUM(p.cost_price * oi.quantity) AS cost
+        SELECT SUM(oi.unit_selling_price * oi.quantity) - COALESCE(ret.returns_value, 0) AS revenue,
+               SUM(p.cost_price * oi.quantity) - COALESCE(ret.returns_cost, 0) AS cost
         FROM CONFORMED.FACT_ORDER_ITEM oi
         JOIN CONFORMED.FACT_ORDER o ON oi.order_sk = o.order_sk
         JOIN CONFORMED.DIM_PRODUCT p ON oi.product_sk = p.product_sk
+        LEFT JOIN (
+            SELECT order_sk,
+                   SUM(return_amount) AS returns_value,
+                   SUM(return_cost) AS returns_cost
+            FROM CONFORMED.FACT_ORDER_RETURN
+            WHERE return_status != 'REJECTED'
+            GROUP BY order_sk
+        ) ret ON o.order_sk = ret.order_sk
         WHERE o.order_status != 'CANCELLED'
     """)
     if not rows:
