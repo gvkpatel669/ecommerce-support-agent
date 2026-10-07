@@ -294,11 +294,12 @@ _VS_RE = re.compile(r"\b(?:vs\.?|versus|compared\s+(?:to|with)|against)\b")
 MAX_COMPARISON_SIDES = 4
 
 
-def comparison_periods(question: str, col: str = "o.order_placed_at", today: date | None = None) -> list[Period]:
+def _all_comparison_windows(question: str, col: str, today: date | None) -> list[Period]:
     """The periods named on each side of an "A vs B" question (empty unless at least two).
 
     At most ``MAX_COMPARISON_SIDES`` distinct windows are returned (each side costs a warehouse
-    query), in the order they were named; repeated windows are dropped.
+    query), in the order they were named; repeated windows are dropped. Use
+    ``comparison_truncated`` to learn whether distinct windows were left out.
 
     A year (or "last year") written on one side also applies to a side that names none of
     its own ("q1 vs q2 2025" is Q1 2025 vs Q2 2025; "march vs april last year" is both 2025),
@@ -326,11 +327,33 @@ def comparison_periods(question: str, col: str = "o.order_placed_at", today: dat
         # Both sides collapsed onto one window: drop the shared year for the sides that assumed it.
         windows = [parse_period(p, col=col, today=today, default_year=None, may_is_month=may_is_month) for p in parts]
         windows = [w for w in windows if w.recognised]
+    return windows
+
+
+def comparison_periods(question: str, col: str = "o.order_placed_at", today: date | None = None) -> list[Period]:
+    """The periods named on each side of an "A vs B" question (empty unless at least two).
+
+    At most ``MAX_COMPARISON_SIDES`` distinct windows are returned (each side costs a warehouse
+    query), in the order they were named; repeated windows are dropped. Use
+    ``comparison_truncated`` to learn whether distinct windows were left out.
+    """
+    return _distinct_windows(_all_comparison_windows(question, col, today))[0]
+
+
+def comparison_truncated(question: str, col: str = "o.order_placed_at", today: date | None = None) -> bool:
+    """True when the question named more distinct windows than ``MAX_COMPARISON_SIDES``."""
+    return _distinct_windows(_all_comparison_windows(question, col, today))[1]
+
+
+def _distinct_windows(windows: list[Period]) -> tuple[list[Period], bool]:
     distinct: list[Period] = []
+    truncated = False
     for w in windows:
-        if all((w.start, w.end) != (d.start, d.end) for d in distinct):
-            distinct.append(w)
+        if any((w.start, w.end) == (d.start, d.end) for d in distinct):
+            continue
         if len(distinct) == MAX_COMPARISON_SIDES:
+            truncated = True
             break
-    return distinct
+        distinct.append(w)
+    return distinct, truncated
 

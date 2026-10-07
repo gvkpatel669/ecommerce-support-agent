@@ -1,7 +1,7 @@
 from langchain_core.tools import tool
 
 from app.snowflake_client import query
-from app.tools._period import _VS_RE, MAX_COMPARISON_SIDES, comparison_periods, parse_period
+from app.tools._period import _VS_RE, MAX_COMPARISON_SIDES, comparison_periods, comparison_truncated, parse_period
 from app.tools._text import has_word
 
 
@@ -16,8 +16,8 @@ def calculate_profit(question: str) -> str:
     if len(sides) >= 2:
         # "A vs B": one aggregate per side, each labelled with its own window.
         header = f"Profit Comparison ({' vs '.join(p.label for p in sides)})"
-        if len(sides) == MAX_COMPARISON_SIDES and len(_VS_RE.split(q)) > MAX_COMPARISON_SIDES:
-            header += f" — first {MAX_COMPARISON_SIDES} periods only"
+        if comparison_truncated(q):
+            header += f" — first {MAX_COMPARISON_SIDES} distinct periods only"
         lines = [header + ":"]
         for p in sides:
             rows = query(f"""

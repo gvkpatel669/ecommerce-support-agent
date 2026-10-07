@@ -277,5 +277,8 @@ def test_profit_comparison_is_capped(monkeypatch):
     import app.tools.calculate_profit as profit_mod
     captured = []
     monkeypatch.setattr(profit_mod, "query", lambda sql, params=None: captured.append(sql) or [{"REVENUE": 1, "COST": 1}])
-    out = profit_mod.calculate_profit.invoke(" vs ".join(["q1", "q2", "q3", "q4"] * 20))
-    assert len(captured) == 4 and "first 4 periods only" in out
+    out = profit_mod.calculate_profit.invoke(" vs ".join(["q1", "q2", "q3", "q4", "h1"] * 20))
+    assert len(captured) == 4 and "first 4 distinct periods only" in out
+    captured.clear()
+    out = profit_mod.calculate_profit.invoke("profit q1 vs q2 vs q3 vs q4 vs q1 vs")
+    assert len(captured) == 4 and "distinct periods only" not in out
