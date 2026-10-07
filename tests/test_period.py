@@ -74,7 +74,16 @@ def test_year_after_orders_is_a_window():
     assert p.recognised and p.label == "2025"
 
 
-@pytest.mark.parametrize("q", ["revenue at 2000 stores", "orders for ticket 2027", "sku 2031"])
+@pytest.mark.parametrize("q,label", [
+    ("sales 2025 / 2026", "2025–2026"),
+    ("profit 2024-25", "FY 2024-25"),
+    ("orders 2025-26", "FY 2025-26"),
+])
+def test_year_spans_and_fy(q, label):
+    assert parse_period(q, col="c", today=TODAY).label == label
+
+
+@pytest.mark.parametrize("q", ["revenue at 2000 stores", "orders for ticket 2027", "sku 2031", "sales 2000 units", "revenue 2025-10-01", "sales 2025-10"])
 def test_numbers_that_are_not_years(q):
     assert not parse_period(q, col="c", today=TODAY).recognised
 

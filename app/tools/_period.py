@@ -238,7 +238,7 @@ def parse_period(question: str, col: str = "o.order_placed_at", today: date | No
         return P(named.start, named.end, named.label)
 
     # Year spans and open-ended years
-    m = re.search(r"\b(20\d\d)\s*(?:-|to|and|through|until)\s*(20\d\d)\b", q)
+    m = re.search(r"\b(20\d\d)\s*(?:-|/|to|and|through|until)\s*(20\d\d)\b", q)
     if m:
         y0, y1 = sorted((int(m.group(1)), int(m.group(2))))
         return P(date(y0, 1, 1), date(y1 + 1, 1, 1), f"{y0}–{y1}")
@@ -251,7 +251,7 @@ def parse_period(question: str, col: str = "o.order_placed_at", today: date | No
     m = re.search(r"\bbefore\s+(20\d\d)\b", q)
     if m:
         return P(None, date(int(m.group(1)), 1, 1), f"before {m.group(1)}")
-    m = re.search(r"\b(?:in|for|of|during|year|orders|sales|revenue|profit)\s+(20\d\d)\b(?![-/]\d)|(?<![#\w])(?<!ticket )(?<!order )(?<!sku )(?<!id )(?<!no\. )(?<!number )(20\d\d)\s*$", q)
+    m = re.search(r"\b(?:in|for|of|during|year|orders|sales|revenue|profit)\s+(20\d\d)\b(?![-/]\d)(?!\s*(?:units?|stores?|items?|orders?|customers?|products?)\b)|(?<![#\w])(?<!ticket )(?<!order )(?<!sku )(?<!id )(?<!no\. )(?<!number )(20\d\d)\s*$", q)
     if m:
         y = int(m.group(1) or m.group(2))
         return P(date(y, 1, 1), date(y + 1, 1, 1), str(y))
