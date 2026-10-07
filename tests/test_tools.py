@@ -255,9 +255,12 @@ def test_cust_dash_id_is_not_a_name_search(monkeypatch):
     assert calls == []
 
 
-def test_profit_vs_comparison_covers_both_periods(monkeypatch):
+def test_profit_vs_comparison_runs_one_aggregate_per_side(monkeypatch):
     import app.tools.calculate_profit as profit_mod
     captured = []
-    monkeypatch.setattr(profit_mod, "query", lambda sql, params=None: captured.append(sql) or [{"QUARTER": "2026 Q1", "REVENUE": 10, "COST": 5}])
-    out = profit_mod.calculate_profit.invoke("compare profit Q1 vs Q2")
-    assert "'2026-01-01'" in captured[0] and "'2026-07-01'" in captured[0] and "Q1 2026 vs Q2 2026" in out
+    monkeypatch.setattr(profit_mod, "query", lambda sql, params=None: captured.append(sql) or [{"REVENUE": 10, "COST": 5}])
+    out = profit_mod.calculate_profit.invoke("profit may vs june")
+    assert len(captured) == 2
+    assert "'2026-05-01' AND o.order_placed_at < '2026-06-01'" in captured[0]
+    assert "'2026-06-01' AND o.order_placed_at < '2026-07-01'" in captured[1]
+    assert "May 2026 vs June 2026" in out and "  May 2026:" in out and "  June 2026:" in out

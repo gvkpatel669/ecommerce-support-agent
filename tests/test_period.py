@@ -117,3 +117,35 @@ def test_round9_windows(q, needle, label):
 
 def test_since_open_ended_sql_has_no_upper_bound():
     assert parse_period("since 2025", col="c", today=TODAY).sql == "AND c >= '2025-01-01'"
+
+
+@pytest.mark.parametrize("q,labels", [
+    ("profit q1 against q1 last year", ["Q1 2026", "Q1 2025"]),
+    ("profit jan vs jan last year", ["January 2026", "January 2025"]),
+    ("revenue in may 2025 vs may", ["May 2025", "May 2026"]),
+    ("profit may vs june", ["May 2026", "June 2026"]),
+    ("profit jan 2025 vs jan 2026", ["January 2025", "January 2026"]),
+    ("profit dec vs jan", ["December 2025", "January 2026"]),
+    ("profit q4 2025 compared to q1 2026", ["Q4 2025", "Q1 2026"]),
+    ("profit q1 vs q2 2025", ["Q1 2025", "Q2 2025"]),
+])
+def test_comparison_sides(q, labels):
+    from app.tools._period import comparison_periods
+    assert [p.label for p in comparison_periods(q, col="c", today=TODAY)] == labels
+
+
+@pytest.mark.parametrize("q", ["orders on 2026-09-15", "sales 2026-10-01 to 2026-10-05", "revenue 2025-13"])
+def test_iso_dates_are_not_financial_years(q):
+    assert not parse_period(q, col="c", today=TODAY).recognised
+
+
+@pytest.mark.parametrize("q,sql,label", [
+    ("sales before march", "AND c < '2026-03-01'", "before March 2026"),
+    ("revenue till march", "AND c < '2026-04-01'", "up to the end of March 2026"),
+    ("last quarter of last year", "AND c >= '2025-10-01' AND c < '2026-01-01'", "Q4 2025"),
+    ("profit for december", "AND c >= '2025-12-01' AND c < '2026-01-01'", "December 2025"),
+    ("nov to dec", "AND c >= '2025-11-01' AND c < '2026-01-01'", "November–December 2025"),
+])
+def test_round10_windows(q, sql, label):
+    p = parse_period(q, col="c", today=TODAY)
+    assert p.sql == sql and p.label == label

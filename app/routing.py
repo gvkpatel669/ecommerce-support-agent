@@ -10,7 +10,7 @@ _PERSONAL_RE = re.compile(
     r"\b(?:my orders?|where is my|where'?s my|cancel my|track(?:ing)? my|return my|refund for my|"
     r"my refund|my delivery|my package|my parcel|my account|my payment|"
     r"cancel (?:an? |the |this )?order|return (?:an? |the |this )?order|refunds? (?:processed|take|issued)|"
-    r"track(?:ing)? (?:an? |the |this )?order|order\s*(?:id\s*)?#?\s*\d+|"
+    r"track(?:ing)? (?:an? |the |this )?order|order\s*(?:(?:id|number|no\.?)\s*)?[:#]?\s*(?:[a-z]{2,4}-?)?\d+|"
     r"can i (?:get|have|request|return)|i want (?:a|to)|i'?d like|i would like|damaged|broken|wrong item|"
     r"not received|hasn'?t arrived)\b",
     re.IGNORECASE,
