@@ -1,51 +1,104 @@
+import logging
+import threading
 from typing import Dict, List, Optional
 
 import snowflake.connector
+from snowflake.connector import errors as sf_errors
 
 from app.config import settings
 
+logger = logging.getLogger("ecombot.snowflake")
+
 _connection = None
+_lock = threading.Lock()
+
+# Snowflake error codes that mean the session is gone and a reconnect will help.
+_SESSION_EXPIRED_CODES = {390112, 390114, 390195}
+
+
+def _connect():
+    return snowflake.connector.connect(
+        account=settings.SNOWFLAKE_ACCOUNT,
+        user=settings.SNOWFLAKE_USER,
+        password=settings.SNOWFLAKE_PASSWORD.get_secret_value(),
+        role=settings.SNOWFLAKE_ROLE,
+        warehouse=settings.SNOWFLAKE_WAREHOUSE,
+        database=settings.SNOWFLAKE_DATABASE,
+        schema=settings.SNOWFLAKE_SCHEMA,
+        login_timeout=10,
+        network_timeout=30,
+        client_session_keep_alive=True,
+    )
 
 
 def _get_connection():
+    """Return the shared connection, (re)opening it if missing or closed. Caller holds _lock."""
     global _connection
     if _connection is None or _connection.is_closed():
-        _connection = snowflake.connector.connect(
-            account=settings.SNOWFLAKE_ACCOUNT,
-            user=settings.SNOWFLAKE_USER,
-            password=settings.SNOWFLAKE_PASSWORD,
-            role=settings.SNOWFLAKE_ROLE,
-            warehouse=settings.SNOWFLAKE_WAREHOUSE,
-            database=settings.SNOWFLAKE_DATABASE,
-            schema=settings.SNOWFLAKE_SCHEMA,
-            login_timeout=10,
-            network_timeout=30,
-        )
+        _connection = _connect()
     return _connection
 
 
-def query(sql: str, params=None) -> List[Dict]:
-    """Execute a SQL query and return results as a list of dicts."""
+def _reset_connection():
+    """Close and drop the shared connection so the next call reconnects. Caller holds _lock."""
     global _connection
-    for attempt in range(2):
-        conn = _get_connection()
-        cursor = conn.cursor()
+    if _connection is not None:
         try:
-            if params:
-                cursor.execute(sql, params)
-            else:
-                cursor.execute(sql)
-            columns = [desc[0] for desc in cursor.description]
-            rows = cursor.fetchall()
-            return [dict(zip(columns, row)) for row in rows]
+            _connection.close()
         except Exception:
-            if attempt == 0:
-                # Force reconnect on first failure (handles expired tokens)
-                _connection = None
-                continue
-            raise
-        finally:
+            pass
+    _connection = None
+
+
+def _is_session_expired(exc: Exception) -> bool:
+    code = getattr(exc, "errno", None)
+    if code in _SESSION_EXPIRED_CODES:
+        return True
+    return isinstance(exc, (sf_errors.OperationalError, sf_errors.InterfaceError))
+
+
+def query(sql: str, params=None) -> List[Dict]:
+    """Execute a SQL query and return results as a list of dicts.
+
+    Reconnects once only when the failure looks like an expired/broken session;
+    real SQL errors are raised immediately.
+    """
+    with _lock:
+        for attempt in range(2):
+            conn = _get_connection()
+            cursor = conn.cursor()
             try:
+                cursor.execute(sql, params) if params else cursor.execute(sql)
+                columns = [desc[0] for desc in cursor.description]
+                rows = cursor.fetchall()
+                return [dict(zip(columns, row)) for row in rows]
+            except Exception as exc:
+                if attempt == 0 and _is_session_expired(exc):
+                    logger.warning("Snowflake session error (%s); reconnecting once", type(exc).__name__)
+                    _reset_connection()
+                    continue
+                raise
+            finally:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+    return []
+
+
+def ping(timeout_seconds: float = 5.0) -> bool:
+    """Readiness probe: run SELECT 1 with a short statement timeout."""
+    try:
+        with _lock:
+            conn = _get_connection()
+            cursor = conn.cursor()
+            try:
+                cursor.execute(f"ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = {int(timeout_seconds)}")
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+                return True
+            finally:
                 cursor.close()
-            except Exception:
-                pass
+    except Exception as exc:
+        logger.warning("Snowflake readiness probe failed: %s", type(exc).__name__)
+        return False

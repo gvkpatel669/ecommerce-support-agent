@@ -10,7 +10,11 @@ def lookup_customer(question: str) -> str:
     q = question.lower()
 
     import re
-    id_match = re.search(r'#?(\d{1,6})', q)
+
+    # "Top customers" questions must win over any digit in the text ("top 5 customers").
+    wants_top = any(w in q for w in ["top", "best", "most", "highest"])
+    # Only treat a number as a customer ID when it is explicitly marked (#42, id 42, customer 42).
+    id_match = None if wants_top else re.search(r'(?:#|\bid\s*#?|\bcustomer\s*#?)\s*(\d{1,6})\b', q)
 
     if id_match:
         cid = id_match.group(1)
@@ -39,7 +43,7 @@ def lookup_customer(question: str) -> str:
                   f"  Phone: {c.get('PHONE_NUMBER', 'N/A')}\n"
                   f"  DOB: {c.get('DATE_OF_BIRTH', 'N/A')}\n"
                   f"  Location: {c.get('CITY', '')}, {c.get('STATE_CODE', '')} {c.get('PINCODE', '')}\n"
-                  f"  Loyalty: {c.get('LOYALTY_TIER', 'N/A')} ({c.get('LOYALTY_POINTS', 0):,.0f} pts)\n"
+                  f"  Loyalty: {c.get('LOYALTY_TIER') or 'N/A'} ({(c.get('LOYALTY_POINTS') or 0):,.0f} pts)\n"
                   f"  Segment: {c.get('CUSTOMER_SEGMENT', 'N/A')}\n")
 
         # Order history
@@ -54,10 +58,10 @@ def lookup_customer(question: str) -> str:
         if orders:
             result += "\n  Recent Orders:\n"
             for o in orders:
-                result += f"    Order {o['ORDER_ID']} ({o['ORDER_DATE']}): ₹{o['GMV_AMOUNT']:,.2f} [{o['ORDER_STATUS']}]\n"
+                result += f"    Order {o['ORDER_ID']} ({o['ORDER_DATE']}): ₹{(o.get('GMV_AMOUNT') or 0):,.2f} [{o.get('ORDER_STATUS') or 'N/A'}]\n"
         return result
 
-    if any(w in q for w in ["top", "best", "most", "highest"]):
+    if wants_top:
         rows = query("""
             SELECT c.customer_sk, c.customer_id, c.full_name, c.email, c.phone_number,
                    COUNT(o.order_sk) AS order_count,
@@ -74,7 +78,7 @@ def lookup_customer(question: str) -> str:
             lines.append(
                 f"  #{r['CUSTOMER_ID']} {r['FULL_NAME']} "
                 f"(email: {r['EMAIL']}, phone: {r['PHONE_NUMBER']}): "
-                f"{r['ORDER_COUNT']} orders, ₹{r['TOTAL_SPENT']:,.2f}"
+                f"{r['ORDER_COUNT']} orders, ₹{(r['TOTAL_SPENT'] or 0):,.2f}"
             )
         return "\n".join(lines)
 
@@ -85,13 +89,15 @@ def lookup_customer(question: str) -> str:
 
     if name_words:
         name = name_words[-1]
+        # Escape LIKE wildcards so "%" or "_" in the question cannot match every row.
+        like = "%" + re.sub(r"([\\%_])", r"\\\1", name) + "%"
         rows = query("""
             SELECT customer_sk, customer_id, full_name, email, phone_number
             FROM CONFORMED.DIM_CUSTOMER
-            WHERE (LOWER(full_name) LIKE %s OR customer_id LIKE %s)
+            WHERE (LOWER(full_name) LIKE %s ESCAPE '\\' OR customer_id LIKE %s ESCAPE '\\')
               AND is_active = TRUE
             LIMIT 10
-        """, (f"%{name}%", f"%{name}%"))
+        """, (like, like))
         if rows:
             lines = [f"Customers matching '{name}':"]
             for r in rows:

@@ -27,7 +27,7 @@ def query_inventory(question: str) -> str:
             return "No low-stock items found."
         lines = ["Low Stock Items (reorder needed):"]
         for r in rows:
-            lines.append(f"  {r['PRODUCT_NAME']} ({r['CATEGORY_L1']}/{r['BRAND']}): {r['AVAILABLE']:,} available, {r['RESERVED']:,} reserved")
+            lines.append(f"  {r['PRODUCT_NAME']} ({r['CATEGORY_L1']}/{r['BRAND']}): {(r['AVAILABLE'] or 0):,} available, {(r['RESERVED'] or 0):,} reserved")
         return "\n".join(lines)
 
     # Filter active product categories
@@ -47,5 +47,5 @@ def query_inventory(question: str) -> str:
         return "No inventory data found."
     lines = ["Inventory Overview by Category:"]
     for r in rows:
-        lines.append(f"  {r['CATEGORY_L1']}: {r['TOTAL_AVAILABLE']:,} available / {r['TOTAL_STOCK']:,} total ({r['PRODUCTS']} products)")
+        lines.append(f"  {r['CATEGORY_L1']}: {(r['TOTAL_AVAILABLE'] or 0):,} available / {(r['TOTAL_STOCK'] or 0):,} total ({r['PRODUCTS'] or 0} products)")
     return "\n".join(lines)

@@ -13,8 +13,8 @@ def calculate_profit(question: str) -> str:
         rows = query("""
             SELECT
                 CASE WHEN QUARTER(o.order_placed_at) = 1 THEN 'Q1' ELSE 'Q2' END AS quarter,
-                SUM(oi.unit_selling_price * oi.quantity) AS revenue,
-                SUM(p.cost_price * oi.quantity) AS cost
+                COALESCE(SUM(oi.unit_selling_price * oi.quantity), 0) AS revenue,
+                COALESCE(SUM(p.cost_price * oi.quantity), 0) AS cost
             FROM CONFORMED.FACT_ORDER_ITEM oi
             JOIN CONFORMED.FACT_ORDER o ON oi.order_sk = o.order_sk
             JOIN CONFORMED.DIM_PRODUCT p ON oi.product_sk = p.product_sk
@@ -34,8 +34,8 @@ def calculate_profit(question: str) -> str:
     if any(w in q for w in ["category", "categories", "breakdown"]):
         rows = query("""
             SELECT p.category_l1,
-                   SUM(oi.unit_selling_price * oi.quantity) AS revenue,
-                   SUM(p.cost_price * oi.quantity) AS cost
+                   COALESCE(SUM(oi.unit_selling_price * oi.quantity), 0) AS revenue,
+                   COALESCE(SUM(p.cost_price * oi.quantity), 0) AS cost
             FROM CONFORMED.FACT_ORDER_ITEM oi
             JOIN CONFORMED.FACT_ORDER o ON oi.order_sk = o.order_sk
             JOIN CONFORMED.DIM_PRODUCT p ON oi.product_sk = p.product_sk
@@ -52,14 +52,14 @@ def calculate_profit(question: str) -> str:
 
     # Default: overall
     rows = query("""
-        SELECT SUM(oi.unit_selling_price * oi.quantity) AS revenue,
-               SUM(p.cost_price * oi.quantity) AS cost
+        SELECT COALESCE(SUM(oi.unit_selling_price * oi.quantity), 0) AS revenue,
+               COALESCE(SUM(p.cost_price * oi.quantity), 0) AS cost
         FROM CONFORMED.FACT_ORDER_ITEM oi
         JOIN CONFORMED.FACT_ORDER o ON oi.order_sk = o.order_sk
         JOIN CONFORMED.DIM_PRODUCT p ON oi.product_sk = p.product_sk
         WHERE o.order_status != 'CANCELLED'
     """)
-    if not rows:
+    if not rows or not (rows[0].get('REVENUE') or 0):
         return "No profit data available."
     r = rows[0]
     profit = r['REVENUE'] - r['COST']
