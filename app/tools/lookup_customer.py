@@ -14,7 +14,8 @@ def lookup_customer(question: str) -> str:
 
     # An explicitly marked ID (#42, id 42, customer 42) always wins; only then do
     # "top/best/most" questions fall through to the ranking query ("top 5 customers").
-    id_match = re.search(r'(?:#|\bid\s*#?|\bcustomer\s*#?)\s*(\d{1,6})\b', q)
+    # A bare "#N" is a customer only when it is not an order/item/invoice number.
+    id_match = re.search(r'(?:\bid\s*#?|\bcustomer\s*#?|(?<!order )(?<!item )(?<!invoice )(?<!order#)#)\s*(\d{1,6})\b', q)
     wants_top = id_match is None and has_word(q, "top", "best", "most", "highest")
 
     if id_match:
@@ -99,7 +100,7 @@ def lookup_customer(question: str) -> str:
         rows = query("""
             SELECT customer_sk, customer_id, full_name, email, phone_number
             FROM CONFORMED.DIM_CUSTOMER
-            WHERE (LOWER(full_name) LIKE %s ESCAPE '!' OR customer_id LIKE %s ESCAPE '!')
+            WHERE (LOWER(full_name) LIKE %s ESCAPE '!' OR LOWER(customer_id) LIKE %s ESCAPE '!')
               AND is_active = TRUE
             LIMIT 10
         """, (like, like))

@@ -27,7 +27,7 @@ def query_sales(question: str) -> str:
         period_filter = "AND o.order_placed_at::DATE >= DATEADD(month, -1, CURRENT_DATE())"
     elif has("q1", "quarter 1", "jan", "january", "feb", "february", "mar", "march"):
         period_filter = "AND o.order_placed_at >= '2026-01-01' AND o.order_placed_at < '2026-04-01'"
-    elif has("q2", "quarter 2", "apr", "april", "jun", "june") or re.search(r"\bmay\b(?!\s+(?:i|we|you)\b)", q):
+    elif has("q2", "quarter 2", "apr", "april", "jun", "june") or re.search(r"\b(?:in|for|of|during|since|until)\s+may\b|\bmay\s+20\d\d\b", q):
         period_filter = "AND o.order_placed_at >= '2026-04-01' AND o.order_placed_at < '2026-07-01'"
     else:
         period_filter = "AND o.order_placed_at::DATE >= DATEADD(day, -30, CURRENT_DATE())"

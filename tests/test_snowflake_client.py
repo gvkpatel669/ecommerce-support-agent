@@ -84,3 +84,20 @@ def test_ping_reconnects_on_expired_session(monkeypatch):
     monkeypatch.setattr(sc, "_connection", first)
     monkeypatch.setattr(sc, "_connect", lambda: _Conn(_Cursor()))
     assert sc.ping() is True
+
+
+def test_ping_reports_last_known_health_when_busy(monkeypatch):
+    monkeypatch.setattr(sc, "_last_healthy", False)
+    assert sc._lock.acquire()
+    try:
+        assert sc.ping(timeout_seconds=1) is False
+    finally:
+        sc._lock.release()
+
+
+def test_query_marks_unhealthy_on_connect_failure(monkeypatch):
+    monkeypatch.setattr(sc, "_connection", None)
+    monkeypatch.setattr(sc, "_connect", lambda: (_ for _ in ()).throw(RuntimeError("down")))
+    with pytest.raises(RuntimeError):
+        sc.query("select 1")
+    assert sc._last_healthy is False

@@ -104,3 +104,28 @@ def test_sales_period_uses_whole_words(monkeypatch):
 def test_profit_handles_empty_data(monkeypatch):
     monkeypatch.setattr(profit_mod, "query", lambda sql, params=None: [{"REVENUE": 0, "COST": 0}])
     assert "No profit data" in profit_mod.calculate_profit.invoke("what is our profit")
+
+
+def test_customer_id_search_is_case_insensitive(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: captured.update(sql=sql, params=params) or [])
+    cust_mod.lookup_customer.invoke("Look up customer CUST000042")
+    assert "LOWER(customer_id) LIKE %s" in captured["sql"]
+    assert captured["params"][1] == "%cust000042%"
+
+
+def test_order_number_is_not_a_customer_id(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: calls.append((sql, params)) or [])
+    cust_mod.lookup_customer.invoke("customer asking about order #98765 delivery")
+    assert not any("customer_id = %s" in sql for sql, _ in calls)
+
+
+def test_sales_may_as_verb_is_not_the_month(monkeypatch):
+    captured = []
+    monkeypatch.setattr(sales_mod, "query", lambda sql, params=None: captured.append(sql) or [{"TOTAL_ORDERS": 0}])
+    sales_mod.query_sales.invoke("Sales may drop, show revenue")
+    assert "2026-04-01" not in captured[0]
+    captured.clear()
+    sales_mod.query_sales.invoke("revenue for May 2026")
+    assert "2026-04-01" in captured[0]

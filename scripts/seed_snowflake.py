@@ -14,15 +14,20 @@ from datetime import date, datetime, timedelta
 import pytz
 
 # ── Connection ──────────────────────────────────────────────────────────────
-CONN_PARAMS = {
-    "account": os.environ["SNOWFLAKE_ACCOUNT"],
-    "user": os.environ.get("SNOWFLAKE_USER", ""),
-    "password": os.environ.get("SNOWFLAKE_PASSWORD", ""),
-    "role": os.environ.get("SNOWFLAKE_ROLE") or None,
-    "warehouse": os.environ.get("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
-    "database": "ECOMM_DATA_LAKE",
-    "schema": "CONFORMED",
-}
+def _conn_params() -> dict:
+    """Connection parameters from the environment (same variables the app reads)."""
+    account = os.environ.get("SNOWFLAKE_ACCOUNT")
+    if not account:
+        raise SystemExit("SNOWFLAKE_ACCOUNT is not set; export it (or load the app's .env) before seeding")
+    return {
+        "account": account,
+        "user": os.environ.get("SNOWFLAKE_USER", ""),
+        "password": os.environ.get("SNOWFLAKE_PASSWORD", ""),
+        "role": os.environ.get("SNOWFLAKE_ROLE") or None,
+        "warehouse": os.environ.get("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
+        "database": "ECOMM_DATA_LAKE",
+        "schema": "CONFORMED",
+    }
 
 IST = pytz.timezone("Asia/Kolkata")
 NOW_IST = datetime.now(IST)
@@ -753,7 +758,7 @@ def seed_inventory(cur, prod_data, location_sk_map):
 def main():
     print("=" * 60)
     print("Connecting to Snowflake ECOMM_DATA_LAKE.CONFORMED...")
-    conn = snowflake.connector.connect(**CONN_PARAMS)
+    conn = snowflake.connector.connect(**_conn_params())
     cur = conn.cursor()
     print("Connected.\n")
 

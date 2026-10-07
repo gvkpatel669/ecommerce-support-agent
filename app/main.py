@@ -106,12 +106,13 @@ class Message(BaseModel):
     def _flatten_multipart(cls, value):
         # OpenAI-style multi-part content: keep the text parts (non-string parts are ignored).
         if isinstance(value, list):
-            text = " ".join(str(p.get("text") or "") for p in value if isinstance(p, dict)).strip()
+            parts = [p.get("text") for p in value if isinstance(p, dict) and isinstance(p.get("text"), str)]
+            text = " ".join(parts).strip()
             if not text:
                 raise ValueError("content has no text")
             return text
-        if not isinstance(value, str):
-            raise ValueError("content must be a string")
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("content must be a non-empty string")
         return value
 
 
@@ -147,9 +148,9 @@ async def chat(request: ChatRequest):
     """Process a chat message through the agent graph."""
     if request.messages:
         messages = [m.model_dump() for m in request.messages]
-    elif request.message:
+    elif request.message and request.message.strip():
         messages = [m.model_dump() for m in request.conversation_history] + [
-            {"role": "user", "content": request.message}
+            {"role": "user", "content": request.message.strip()}
         ]
     else:
         raise HTTPException(status_code=422, detail="No message provided")

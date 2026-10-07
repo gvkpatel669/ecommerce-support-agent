@@ -11,6 +11,8 @@ logger = logging.getLogger("ecombot.snowflake")
 
 _connection = None
 _lock = threading.Lock()
+_last_healthy = True  # outcome of the most recent query/ping; reported when the connection is busy
+LOCK_WAIT_SECONDS = 30
 
 # Snowflake error codes that mean the session is gone and a reconnect will help.
 _SESSION_EXPIRED_CODES = {390112, 390114, 390195}
@@ -65,20 +67,29 @@ def query(sql: str, params=None) -> List[Dict]:
     Reconnects once only when the failure looks like an expired/broken session;
     real SQL errors are raised immediately.
     """
-    with _lock:
+    global _last_healthy
+    if not _lock.acquire(timeout=LOCK_WAIT_SECONDS):
+        raise TimeoutError("warehouse busy: could not acquire the connection in time")
+    try:
         for attempt in range(2):
-            conn = _get_connection()  # a connect failure is raised as-is (never retried here)
-            cursor = conn.cursor()
+            try:
+                conn = _get_connection()  # a connect failure is raised as-is (never retried here)
+                cursor = conn.cursor()
+            except Exception:
+                _last_healthy = False
+                raise
             try:
                 cursor.execute(sql, params, timeout=QUERY_TIMEOUT_SECONDS)
                 columns = [desc[0] for desc in cursor.description]
                 rows = cursor.fetchall()
+                _last_healthy = True
                 return [dict(zip(columns, row)) for row in rows]
             except Exception as exc:
                 if attempt == 0 and _is_session_expired(exc):
                     logger.warning("Snowflake session error (%s); reconnecting once", type(exc).__name__)
                     _reset_connection()
                     continue
+                _last_healthy = not _is_session_expired(exc)  # SQL errors do not mean the warehouse is down
                 raise
             finally:
                 try:
@@ -86,6 +97,8 @@ def query(sql: str, params=None) -> List[Dict]:
                 except Exception:
                     pass
         raise RuntimeError("unreachable")  # pragma: no cover
+    finally:
+        _lock.release()
 
 
 def ping(timeout_seconds: float = 5.0) -> bool:
@@ -95,28 +108,36 @@ def ping(timeout_seconds: float = 5.0) -> bool:
     probe reports healthy without waiting behind it. A connect failure is reported once,
     not retried; an expired session is reconnected once like query().
     """
+    global _last_healthy
     if not _lock.acquire(timeout=1.0):
-        return True
+        return _last_healthy  # busy: report the most recent known outcome, not an assumption
     try:
         for attempt in range(2):
             try:
                 conn = _get_connection()
+                cursor = conn.cursor()
             except Exception as exc:
                 logger.warning("Snowflake readiness probe could not connect: %s", type(exc).__name__)
+                _last_healthy = False
                 return False
-            cursor = conn.cursor()
             try:
                 cursor.execute("SELECT 1", timeout=max(1, int(timeout_seconds)))
                 cursor.fetchone()
+                _last_healthy = True
                 return True
             except Exception as exc:
                 if attempt == 0 and _is_session_expired(exc):
                     _reset_connection()
                     continue
                 logger.warning("Snowflake readiness probe failed: %s", type(exc).__name__)
+                _last_healthy = False
                 return False
             finally:
-                cursor.close()
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+        _last_healthy = False
         return False
     finally:
         _lock.release()

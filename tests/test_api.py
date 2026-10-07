@@ -125,3 +125,15 @@ def test_chunked_body_within_limit_still_parses(monkeypatch):
 
     resp = client.post("/chat", content=chunks(), headers={"Content-Type": "application/json"})
     assert resp.status_code == 200
+
+
+def test_multipart_non_string_text_is_422():
+    client = TestClient(main_mod.app)
+    resp = client.post("/chat", json={"messages": [{"role": "user", "content": [{"type": "text", "text": 5}]}]})
+    assert resp.status_code == 422
+
+
+def test_blank_string_content_is_422():
+    client = TestClient(main_mod.app)
+    resp = client.post("/chat", json={"message": "   "})
+    assert resp.status_code == 422
