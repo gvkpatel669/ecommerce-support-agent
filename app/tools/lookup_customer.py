@@ -1,7 +1,7 @@
 from langchain_core.tools import tool
 
 from app.snowflake_client import query
-from app.tools._text import has_word, tokens
+from app.tools._text import escape_like, has_word, tokens
 
 
 @tool
@@ -12,10 +12,10 @@ def lookup_customer(question: str) -> str:
 
     import re
 
-    # "Top customers" questions must win over any digit in the text ("top 5 customers").
-    wants_top = has_word(q, "top", "best", "most", "highest")
-    # Only treat a number as a customer ID when it is explicitly marked (#42, id 42, customer 42).
-    id_match = None if wants_top else re.search(r'(?:#|\bid\s*#?|\bcustomer\s*#?)\s*(\d{1,6})\b', q)
+    # An explicitly marked ID (#42, id 42, customer 42) always wins; only then do
+    # "top/best/most" questions fall through to the ranking query ("top 5 customers").
+    id_match = re.search(r'(?:#|\bid\s*#?|\bcustomer\s*#?)\s*(\d{1,6})\b', q)
+    wants_top = id_match is None and has_word(q, "top", "best", "most", "highest")
 
     if id_match:
         cid = id_match.group(1)
@@ -84,15 +84,18 @@ def lookup_customer(question: str) -> str:
         return "\n".join(lines)
 
     # Search by name using parameterized query
-    name_words = [w for w in tokens(q) if len(w) > 2 and w not in
-        {"customer", "buyer", "account", "info", "details", "contact",
-         "the", "for", "get", "find", "look", "who", "what", "show", "list"}]
+    stopwords = {
+        "customer", "customers", "buyer", "buyers", "shopper", "account", "info", "details", "contact",
+        "the", "for", "get", "find", "look", "lookup", "who", "what", "show", "list", "about", "tell",
+        "please", "orders", "order", "profile", "named", "called", "give", "with", "and", "his", "her",
+    }
+    name_words = [w for w in tokens(q) if len(w) > 2 and w not in stopwords]
 
     if name_words:
-        name = name_words[-1]
-        # Escape LIKE wildcards so "%" or "_" in the question cannot match every row.
+        name = name_words[0]
+        # Escape LIKE wildcards so "%" or "_" cannot match every row.
         # '!' is the escape char: a backslash literal is itself an escape in Snowflake strings.
-        like = "%" + re.sub(r"([!%_])", r"!\1", name) + "%"
+        like = "%" + escape_like(name) + "%"
         rows = query("""
             SELECT customer_sk, customer_id, full_name, email, phone_number
             FROM CONFORMED.DIM_CUSTOMER

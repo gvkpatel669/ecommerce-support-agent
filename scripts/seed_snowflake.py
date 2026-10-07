@@ -15,10 +15,10 @@ import pytz
 
 # ── Connection ──────────────────────────────────────────────────────────────
 CONN_PARAMS = {
-    "account": os.environ.get("SNOWFLAKE_ACCOUNT", "LVSAHNU-PR54555"),
+    "account": os.environ["SNOWFLAKE_ACCOUNT"],
     "user": os.environ.get("SNOWFLAKE_USER", ""),
     "password": os.environ.get("SNOWFLAKE_PASSWORD", ""),
-    "role": os.environ.get("SNOWFLAKE_ROLE", "ACCOUNTADMIN"),
+    "role": os.environ.get("SNOWFLAKE_ROLE") or None,
     "warehouse": os.environ.get("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
     "database": "ECOMM_DATA_LAKE",
     "schema": "CONFORMED",

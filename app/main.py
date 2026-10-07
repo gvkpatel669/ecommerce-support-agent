@@ -1,17 +1,19 @@
 import hmac
+import json
 import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
 from typing import List, Literal, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
 from app.config import settings
 from app.graph import graph
+from app.snowflake_client import close as close_snowflake, ping as snowflake_ping
 
 MAX_MESSAGE_CHARS = 4000
 MAX_MESSAGES = 20
@@ -30,24 +32,69 @@ async def lifespan(_: FastAPI):
     if not settings.ECOMBOT_API_KEY.get_secret_value():
         logger.warning("ECOMBOT_API_KEY not set — /chat is unauthenticated (demo mode)")
     yield
-    from app.snowflake_client import close as close_snowflake
-    close_snowflake()
+    await run_in_threadpool(close_snowflake)
 
 
 app = FastAPI(title="Ecommerce Support Agent", version="1.0.0", lifespan=lifespan)
 
 
-@app.middleware("http")
-async def limit_body_size(request: Request, call_next):
-    """Reject oversized bodies before they are parsed (chunked bodies are capped by the server)."""
-    length = request.headers.get("content-length")
-    if length is not None:
-        try:
-            if int(length) > MAX_BODY_BYTES:
-                return JSONResponse(status_code=413, content={"detail": "Request body too large"})
-        except ValueError:
-            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
-    return await call_next(request)
+class BodySizeLimitMiddleware:
+    """Pure ASGI middleware: rejects oversized bodies, including chunked ones, before parsing.
+
+    With a Content-Length the check is immediate. Without one (chunked transfer) the body
+    is read up to the limit here, rejected with 413 if it exceeds it, and otherwise replayed
+    to the application, so memory use is bounded by max_bytes.
+    """
+
+    def __init__(self, app, max_bytes: int):
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        headers = dict(scope.get("headers") or [])
+        length = headers.get(b"content-length")
+        if length is not None:
+            try:
+                if int(length) > self.max_bytes:
+                    return await self._reject(send, 413, "Request body too large")
+            except ValueError:
+                return await self._reject(send, 400, "Invalid Content-Length")
+            return await self.app(scope, receive, send)
+
+        # No Content-Length: buffer up to the limit, then replay.
+        chunks: list = []
+        total = 0
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                chunks.append(message)
+                break
+            body = message.get("body", b"")
+            total += len(body)
+            if total > self.max_bytes:
+                return await self._reject(send, 413, "Request body too large")
+            chunks.append(message)
+            if not message.get("more_body", False):
+                break
+
+        async def replay():
+            if chunks:
+                return chunks.pop(0)
+            return await receive()
+
+        return await self.app(scope, replay, send)
+
+    @staticmethod
+    async def _reject(send, status: int, detail: str):
+        body = json.dumps({"detail": detail}).encode()
+        await send({"type": "http.response.start", "status": status,
+                    "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
+
+
+app.add_middleware(BodySizeLimitMiddleware, max_bytes=MAX_BODY_BYTES)
 
 
 class Message(BaseModel):
@@ -57,9 +104,14 @@ class Message(BaseModel):
     @field_validator("content", mode="before")
     @classmethod
     def _flatten_multipart(cls, value):
-        # OpenAI-style multi-part content: keep the text parts.
+        # OpenAI-style multi-part content: keep the text parts (non-string parts are ignored).
         if isinstance(value, list):
-            return " ".join(p.get("text", "") for p in value if isinstance(p, dict)).strip()
+            text = " ".join(str(p.get("text") or "") for p in value if isinstance(p, dict)).strip()
+            if not text:
+                raise ValueError("content has no text")
+            return text
+        if not isinstance(value, str):
+            raise ValueError("content must be a string")
         return value
 
 
@@ -86,7 +138,7 @@ def require_api_key(
     presented = x_api_key
     if not presented and authorization and authorization.lower().startswith("bearer "):
         presented = authorization[7:].strip()
-    if not presented or not hmac.compare_digest(presented, expected):
+    if not presented or not hmac.compare_digest(presented.encode("utf-8"), expected.encode("utf-8")):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
@@ -129,11 +181,9 @@ async def health():
 @app.get("/ready")
 async def ready():
     """Readiness: configuration present and the warehouse answers a trivial query."""
-    from app.snowflake_client import ping
-
     checks = {
         "llm_key_configured": bool(settings.LLM_API_KEY.get_secret_value()),
-        "snowflake": await run_in_threadpool(ping),
+        "snowflake": await run_in_threadpool(snowflake_ping),
     }
     status_code = 200 if all(checks.values()) else 503
     return JSONResponse(status_code=status_code, content={"status": "ready" if status_code == 200 else "degraded", "checks": checks})

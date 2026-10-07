@@ -44,6 +44,36 @@ def test_like_wildcards_are_escaped(monkeypatch):
     assert "ESCAPE '!'" in captured["sql"]  # a backslash literal would itself be an escape in Snowflake
 
 
+def test_escape_like_escapes_wildcards_and_itself():
+    from app.tools._text import escape_like
+    assert escape_like("50%_off!") == "50!%!_off!!"
+
+
+def test_explicit_id_wins_over_most_recent(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: calls.append(sql) or [])
+    cust_mod.lookup_customer.invoke("show the most recent orders for customer #42")
+    assert any("customer_id = %s" in sql for sql in calls)
+    assert not any("GROUP BY" in sql for sql in calls)
+
+
+def test_name_search_uses_first_name_token(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: captured.update(params=params) or [])
+    cust_mod.lookup_customer.invoke("Find customer Rahul's orders please")
+    assert captured["params"][0] == "%rahul%"
+
+
+def test_may_i_is_not_the_month_of_may(monkeypatch):
+    captured = []
+    monkeypatch.setattr(sales_mod, "query", lambda sql, params=None: captured.append(sql) or [{"TOTAL_ORDERS": 0}])
+    sales_mod.query_sales.invoke("May I see the sales numbers?")
+    assert "2026-04-01" not in captured[0]
+    captured.clear()
+    sales_mod.query_sales.invoke("sales in May")
+    assert "2026-04-01" in captured[0]
+
+
 def test_name_search_strips_punctuation(monkeypatch):
     captured = {}
     monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: captured.update(params=params) or [])

@@ -67,10 +67,10 @@ def query(sql: str, params=None) -> List[Dict]:
     """
     with _lock:
         for attempt in range(2):
-            conn = _get_connection()
+            conn = _get_connection()  # a connect failure is raised as-is (never retried here)
             cursor = conn.cursor()
             try:
-                cursor.execute(sql, params, timeout=QUERY_TIMEOUT_SECONDS) if params else cursor.execute(sql, timeout=QUERY_TIMEOUT_SECONDS)
+                cursor.execute(sql, params, timeout=QUERY_TIMEOUT_SECONDS)
                 columns = [desc[0] for desc in cursor.description]
                 rows = cursor.fetchall()
                 return [dict(zip(columns, row)) for row in rows]
@@ -85,30 +85,41 @@ def query(sql: str, params=None) -> List[Dict]:
                     cursor.close()
                 except Exception:
                     pass
-    return []
+        raise RuntimeError("unreachable")  # pragma: no cover
 
 
 def ping(timeout_seconds: float = 5.0) -> bool:
     """Readiness probe: SELECT 1 with a per-statement timeout (the session is not altered).
-    Reconnects once when the shared session has expired, like query()."""
-    with _lock:
+
+    If the shared connection is busy serving a query, it is by definition alive, so the
+    probe reports healthy without waiting behind it. A connect failure is reported once,
+    not retried; an expired session is reconnected once like query().
+    """
+    if not _lock.acquire(timeout=1.0):
+        return True
+    try:
         for attempt in range(2):
             try:
                 conn = _get_connection()
-                cursor = conn.cursor()
-                try:
-                    cursor.execute("SELECT 1", timeout=int(timeout_seconds))
-                    cursor.fetchone()
-                    return True
-                finally:
-                    cursor.close()
+            except Exception as exc:
+                logger.warning("Snowflake readiness probe could not connect: %s", type(exc).__name__)
+                return False
+            cursor = conn.cursor()
+            try:
+                cursor.execute("SELECT 1", timeout=max(1, int(timeout_seconds)))
+                cursor.fetchone()
+                return True
             except Exception as exc:
                 if attempt == 0 and _is_session_expired(exc):
                     _reset_connection()
                     continue
                 logger.warning("Snowflake readiness probe failed: %s", type(exc).__name__)
                 return False
-    return False
+            finally:
+                cursor.close()
+        return False
+    finally:
+        _lock.release()
 
 
 def close() -> None:

@@ -7,5 +7,10 @@ def has_word(text: str, *words: str) -> bool:
 
 
 def tokens(text: str) -> list[str]:
-    """Alphanumeric tokens of text, lower-cased (punctuation stripped)."""
-    return re.findall(r"[a-z0-9]+", text.lower())
+    """Word tokens of text (unicode letters/digits, no underscore), lower-cased."""
+    return re.findall(r"[^\W_]+", text.lower())
+
+
+def escape_like(value: str, escape: str = "!") -> str:
+    """Escape LIKE wildcards (and the escape char itself) for use with `LIKE ... ESCAPE '!'`."""
+    return re.sub(rf"([{re.escape(escape)}%_])", rf"{escape}\1", value)

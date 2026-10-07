@@ -51,7 +51,7 @@ def _message_content(msg) -> str:
         content = getattr(msg, "content", msg)
     if isinstance(content, list):  # OpenAI multi-part content
         content = " ".join(
-            part.get("text", "") for part in content if isinstance(part, dict)
+            str(part.get("text") or "") for part in content if isinstance(part, dict)
         )
     return content if isinstance(content, str) else str(content or "")
 
@@ -135,7 +135,12 @@ def format_response_node(state: AgentState) -> AgentState:
     try:
         response = get_llm().invoke(prompt_messages)
         content = response.content if isinstance(response.content, str) else str(response.content)
-        return {**state, "response": strip_reasoning(content)}
+        answer = strip_reasoning(content)
+        if not answer:
+            # Reasoning cut off by max_tokens with no visible answer: say so instead of returning "".
+            logger.warning("LLM returned no answer text after stripping reasoning")
+            return {**state, "response": "I could not generate a response right now. Please try again."}
+        return {**state, "response": answer}
     except Exception:
         logger.exception("LLM formatting failed")
         return {**state, "response": "I could not generate a response right now. Please try again."}

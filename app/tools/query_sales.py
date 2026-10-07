@@ -1,17 +1,19 @@
+import re
+
 from langchain_core.tools import tool
 
 from app.snowflake_client import query
+from app.tools._text import has_word
 
 
 @tool
 def query_sales(question: str) -> str:
     """Query sales data including revenue, orders, and trends.
     Use this for questions about revenue, sales, orders, GMV, and trends."""
-    import re
     q = question.lower()
 
     def has(*words):
-        return any(re.search(rf"\b{re.escape(w)}\b", q) for w in words)
+        return has_word(q, *words)
 
     # Determine time period
     period_filter = ""
@@ -25,7 +27,7 @@ def query_sales(question: str) -> str:
         period_filter = "AND o.order_placed_at::DATE >= DATEADD(month, -1, CURRENT_DATE())"
     elif has("q1", "quarter 1", "jan", "january", "feb", "february", "mar", "march"):
         period_filter = "AND o.order_placed_at >= '2026-01-01' AND o.order_placed_at < '2026-04-01'"
-    elif has("q2", "quarter 2", "apr", "april", "may", "jun", "june"):
+    elif has("q2", "quarter 2", "apr", "april", "jun", "june") or re.search(r"\bmay\b(?!\s+(?:i|we|you)\b)", q):
         period_filter = "AND o.order_placed_at >= '2026-04-01' AND o.order_placed_at < '2026-07-01'"
     else:
         period_filter = "AND o.order_placed_at::DATE >= DATEADD(day, -30, CURRENT_DATE())"
