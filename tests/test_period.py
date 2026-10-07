@@ -69,6 +69,11 @@ def test_round8_windows(q, needle, label):
     assert p.label == label
 
 
+def test_year_after_orders_is_a_window():
+    p = parse_period("orders 2025", col="c", today=TODAY)
+    assert p.recognised and p.label == "2025"
+
+
 @pytest.mark.parametrize("q", ["revenue at 2000 stores", "orders for ticket 2027", "sku 2031"])
 def test_numbers_that_are_not_years(q):
     assert not parse_period(q, col="c", today=TODAY).recognised

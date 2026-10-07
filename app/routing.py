@@ -24,7 +24,10 @@ _POLICY_RE = re.compile(
 # A reference to specific orders: "order 5", "orders #5 and #6", "order no. 7", "ORD-123".
 # A year after "orders" ("orders 2025") is a window, not an id.
 _ORDER_REF_RE = re.compile(
-    r"\borders?\s*(?:(?:id|number|no\.?)\s*)?(?:[:#]\s*\d+|(?:[a-z]{2,4}-?)?(?!20\d\d\b)\d+)\b|\bord-?\d+\b",
+    r"\border\s*(?:(?:id|number|no\.?)\s*)?[:#]?\s*(?:[a-z]{2,4}-?)?\d+\b"        # order 5 / order id 2025 / order ORD123
+    r"|\borders\s*(?:id|number|no\.?)\s*[:#]?\s*\d+\b"                          # orders id 7
+    r"|\borders\s*(?:[:#]\s*\d+|(?:[a-z]{2,4}-?)?(?!20\d\d\b)\d+)\b"          # orders #5 / orders 5 (not orders 2025)
+    r"|\bord-?\d+\b",
     re.IGNORECASE,
 )
 _HOWTO_RE = re.compile(r"\b(?:how (?:do|can|should|would) (?:i|we|one))\b", re.IGNORECASE)
