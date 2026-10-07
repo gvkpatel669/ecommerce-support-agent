@@ -1,18 +1,19 @@
-"""Natural-language time windows → Snowflake date filters.
+"""Natural-language time windows → concrete date ranges → Snowflake filters.
 
-One place for every phrasing the tools understand, so "last quarter", "May 2026", "past 2
-weeks" and "this month" mean the same thing everywhere. Calendar periods use Snowflake's
-DATE_TRUNC so they are evaluated at query time in the session timezone (the client sets it
-to Asia/Kolkata); explicit months/quarters/years are computed here from today's date. Month
-names without a year mean the current year, except that a span such as "nov to feb" wraps
-into the previous year.
+Every phrasing the tools understand resolves to a half-open [start, end) date range computed
+in Python from "today" (the IST calendar date, matching the seeded data), so windows can be
+compared and combined without SQL expressions. The SQL fragment then contains only ISO dates
+produced here; no user text is ever interpolated.
 
-The SQL fragment only ever contains regex-captured integers and ISO dates computed here;
-no user text is interpolated.
+Unrecognised phrasings fall back to the last 30 days with ``recognised=False`` and an explicit
+label, so the answer never presents a guessed window as the asked one.
 """
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
+from zoneinfo import ZoneInfo
+
+from app.config import settings
 
 _MONTHS = {
     "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3, "apr": 4, "april": 4,
@@ -20,34 +21,68 @@ _MONTHS = {
     "september": 9, "oct": 10, "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
 }
 _MONTH_NAMES = "|".join(sorted(_MONTHS, key=len, reverse=True))
-_MONTH_RE = re.compile(rf"(?<![\w])(?P<m>{_MONTH_NAMES})(?!\w)(?:\s+(?:(?P<y>20\d\d)|'(?P<y2>\d\d)))?", re.IGNORECASE)
-# "may" is also a verb; count it as a month only in date context.
-_MAY_CONTEXT_RE = re.compile(
-    r"\b(?:in|for|of|during|since|until|from|through|to|and|till|between)\s+may\b|\bmay\s+(?:20\d\d|and|to|through)\b",
+_MONTH_RE = re.compile(
+    rf"(?:(?P<ybefore>20\d\d)\s+)?(?<![\w])(?P<m>{_MONTH_NAMES})(?!\w)(?:\s*(?:(?P<y>20\d\d)|'(?P<y2>\d\d)))?",
     re.IGNORECASE,
 )
-_UNIT_DAYS = {"day": 1, "days": 1, "week": 7, "weeks": 7}
+# "may" is also a verb; count it as a month only in date context.
+_MAY_CONTEXT_RE = re.compile(
+    r"\b(?:in|for|of|during|since|until|from|through|to|and|till|between|vs|versus)\s+may\b|\bmay\s+(?:20\d\d|'\d\d|and|to|through|vs)\b",
+    re.IGNORECASE,
+)
+_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+          "nine": 9, "ten": 10, "twelve": 12}
+_ORDINAL = {"first": 1, "1st": 1, "second": 2, "2nd": 2, "third": 3, "3rd": 3, "fourth": 4, "4th": 4}
 _LABEL_MONTH = ["", "January", "February", "March", "April", "May", "June", "July", "August",
                 "September", "October", "November", "December"]
 DEFAULT_LABEL = "the last 30 days (default window)"
 
 
+def today_local() -> date:
+    """Calendar date in the data's timezone (the Snowflake session timezone)."""
+    from datetime import datetime
+    return datetime.now(ZoneInfo(settings.SNOWFLAKE_TIMEZONE)).date()
+
+
 @dataclass(frozen=True)
 class Period:
-    sql: str          # "AND <col> ..." fragment, safe to interpolate
-    label: str        # human-readable window, echoed back in the answer
-    recognised: bool = True  # False when the question named no window we understand
+    start: date | None          # inclusive; None = open
+    end: date | None            # exclusive; None = open ("up to now")
+    label: str
+    col: str = "o.order_placed_at"
+    recognised: bool = True
+
+    @property
+    def sql(self) -> str:
+        """``AND col >= 'YYYY-MM-DD' AND col < 'YYYY-MM-DD'`` with only computed ISO dates."""
+        parts = []
+        if self.start is not None:
+            parts.append(f"{self.col} >= '{self.start.isoformat()}'")
+        if self.end is not None:
+            parts.append(f"{self.col} < '{self.end.isoformat()}'")
+        return ("AND " + " AND ".join(parts)) if parts else ""
 
 
-def _between(col, start: date, end_exclusive: date | None) -> str:
-    sql = f"AND {col} >= '{start.isoformat()}'"
-    if end_exclusive is not None:
-        sql += f" AND {col} < '{end_exclusive.isoformat()}'"
-    return sql
+# ── date helpers ─────────────────────────────────────────────────────────────
+def _add_months(d: date, n: int) -> date:
+    m = d.month - 1 + n
+    return date(d.year + m // 12, m % 12 + 1, 1)
 
 
-def _next_month(year: int, month: int) -> date:
-    return date(year + (month == 12), (month % 12) + 1, 1)
+def _month_start(y: int, m: int) -> date:
+    return date(y, m, 1)
+
+
+def _next_month(y: int, m: int) -> date:
+    return _add_months(date(y, m, 1), 1)
+
+
+def _quarter(y: int, qn: int) -> tuple[date, date]:
+    return date(y, 3 * qn - 2, 1), _next_month(y, 3 * qn)
+
+
+def _fy(start_year: int) -> tuple[date, date, str]:
+    return date(start_year, 4, 1), date(start_year + 1, 4, 1), f"FY {start_year}-{str(start_year + 1)[2:]}"
 
 
 def _month_label(y0, m0, y1, m1) -> str:
@@ -58,168 +93,208 @@ def _month_label(y0, m0, y1, m1) -> str:
     return f"{_LABEL_MONTH[m0]} {y0}–{_LABEL_MONTH[m1]} {y1}"
 
 
-def _named_months(q: str, today: date) -> Period | None:
+def _year_qualifier(q: str, today: date, default_year: int | None) -> int | None:
+    """An explicit year to apply to months/quarters that carry none."""
+    if re.search(r"\b(?:last|previous)\s+year\b", q):
+        return today.year - 1
+    return default_year
+
+
+# ── named months ─────────────────────────────────────────────────────────────
+def _named_months(q: str, today: date, default_year: int | None, may_is_month: bool):
     mentions = []
     for m in _MONTH_RE.finditer(q):
         name = m.group("m").lower()
-        if name == "may" and not _MAY_CONTEXT_RE.search(q):
+        if name == "may" and not may_is_month:
             continue
-        year = int(m.group("y")) if m.group("y") else (2000 + int(m.group("y2")) if m.group("y2") else None)
+        year = None
+        if m.group("ybefore"):
+            year = int(m.group("ybefore"))
+        elif m.group("y"):
+            year = int(m.group("y"))
+        elif m.group("y2"):
+            year = 2000 + int(m.group("y2"))
         mentions.append((year, _MONTHS[name], m.start()))
     if not mentions:
         return None
-    # Year qualifier: an explicit year, or "this/last year" applied to the month.
     explicit = next((y for y, _, _ in mentions if y), None)
-    if explicit is None and re.search(r"\b(?:last|previous)\s+year\b", q):
-        explicit = today.year - 1
-    default_year = explicit or today.year
-    first = mentions[0]
-    last = mentions[-1]
-    y0, m0 = first[0] or default_year, first[1]
-    y1, m1 = last[0] or default_year, last[1]
+    fallback = explicit or _year_qualifier(q, today, default_year) or today.year
+    first, last = mentions[0], mentions[-1]
+    y0, m0 = first[0] or fallback, first[1]
+    y1, m1 = last[0] or fallback, last[1]
     if (y0, m0) > (y1, m1):
         if first[0] is None and last[0] is None:
-            y0 -= 1  # "nov to feb" wraps into the previous year
+            y0 -= 1                      # "nov to feb" wraps into the previous year
         elif first[0] is not None and last[0] is None:
-            y1 = y0 + 1  # "nov 2025 to feb" rolls forward
+            y1 = y0 + 1                  # "nov 2025 to feb" rolls forward
         elif first[0] is None and last[0] is not None:
-            y0 = y1 - 1  # "nov to feb 2026" rolls back
+            y0 = y1 - 1                  # "nov to feb 2026" rolls back
         else:
             (y0, m0), (y1, m1) = (y1, m1), (y0, m0)
-    col_placeholder = "{col}"
-    start = date(y0, m0, 1)
-    if re.search(rf"\bsince\s+(?:{_MONTH_NAMES})\b", q[: first[2] + 12]):
-        return Period(_between(col_placeholder, start, None), f"since {_LABEL_MONTH[m0]} {y0}")
-    return Period(_between(col_placeholder, start, _next_month(y1, m1)), _month_label(y0, m0, y1, m1))
+    start = _month_start(y0, m0)
+    if re.search(rf"\b(?:since|from)\s+(?:{_MONTH_NAMES})\b", q) and len(mentions) == 1 and not re.search(r"\b(?:to|until|till|through|and)\b", q):
+        return Period(start, None, f"since {_LABEL_MONTH[m0]} {y0}")
+    return Period(start, _next_month(y1, m1), _month_label(y0, m0, y1, m1))
 
 
-def parse_period(question: str, col: str = "o.order_placed_at", today: date | None = None) -> Period:
+# ── main parser ──────────────────────────────────────────────────────────────
+def parse_period(question: str, col: str = "o.order_placed_at", today: date | None = None,
+                 default_year: int | None = None, may_is_month: bool | None = None) -> Period:
     q = question.lower()
-    today = today or date.today()
+    today = today or today_local()
+    if may_is_month is None:
+        may_is_month = _MAY_CONTEXT_RE.search(q) is not None
 
     def word(*ws):
         return any(re.search(rf"\b{re.escape(w)}\b", q) for w in ws)
 
-    def done(sql, label, recognised=True):
-        return Period(sql.replace("{col}", col), label, recognised)
+    def P(start, end, label, recognised=True):
+        return Period(start, end, label, col, recognised)
+
+    tomorrow = today + timedelta(days=1)
 
     if word("today"):
-        return done("AND {col}::DATE = CURRENT_DATE()", "today")
+        return P(today, tomorrow, "today")
     if word("yesterday"):
-        return done("AND {col}::DATE = CURRENT_DATE() - 1", "yesterday")
+        return P(today - timedelta(days=1), today, "yesterday")
 
-    _WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
-              "nine": 9, "ten": 10, "twelve": 12}
     if re.search(r"\b(?:last|past)\s+fortnight\b", q):
-        return done("AND {col}::DATE >= DATEADD(day, -14, CURRENT_DATE())", "the last 14 days")
+        return P(today - timedelta(days=14), None, "the last 14 days")
     m = re.search(r"\b(?:last|past|previous)\s+(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|twelve)\s+(days?|weeks?|months?|quarters?|years?)\b", q)
     if m:
-        n, unit = (int(m.group(1)) if m.group(1).isdigit() else _WORDS[m.group(1)]), m.group(2)
-        if unit in _UNIT_DAYS:
-            return done(f"AND {{col}}::DATE >= DATEADD(day, -{n * _UNIT_DAYS[unit]}, CURRENT_DATE())", f"the last {n} {unit}")
-        part = "month" if unit.startswith("month") else "quarter" if unit.startswith("quarter") else "year"
-        return done(f"AND {{col}}::DATE >= DATEADD({part}, -{n}, CURRENT_DATE())", f"the last {n} {unit}")
+        n = int(m.group(1)) if m.group(1).isdigit() else _WORDS[m.group(1)]
+        unit = m.group(2)
+        label = f"the last {n} {unit}"
+        if unit.startswith("day"):
+            return P(today - timedelta(days=n), None, label)
+        if unit.startswith("week"):
+            return P(today - timedelta(days=7 * n), None, label)
+        if unit.startswith("month"):
+            return P(_shift_months(today, -n), None, label)
+        if unit.startswith("quarter"):
+            return P(_shift_months(today, -3 * n), None, label)
+        return P(_shift_years(today, -n), None, label)
+    if re.search(r"\b(?:past\s+year|(?:last|past)\s+twelve\s+months)\b", q):
+        return P(_shift_years(today, -1), None, "the last 12 months")
 
-    if re.search(r"\b(?:past\s+year|last\s+twelve\s+months|past\s+twelve\s+months)\b", q):
-        # Rolling 12 months; the calendar "last year" is handled further down.
-        return done("AND {col}::DATE >= DATEADD(year, -1, CURRENT_DATE())", "the last 12 months")
-
-    # Half years: "H1", "h2 2025"
-    m = re.search(r"\bh([12])(?:\s+(?:of\s+)?(20\d\d))?\b", q)
+    # Half years: "H1", "h2 2025", "first half 2025", "second half of last year"
+    m = re.search(r"\b(?:h([12])|(first|second|1st|2nd)\s+half)(?:\s+(?:of\s+)?(?:the\s+)?(20\d\d|last year|this year))?\b", q)
     if m:
-        half, year = int(m.group(1)), int(m.group(2)) if m.group(2) else today.year
-        start = date(year, 1 if half == 1 else 7, 1)
-        end = date(year, 7, 1) if half == 1 else date(year + 1, 1, 1)
-        return done(_between("{col}", start, end), f"H{half} {year}")
+        half = int(m.group(1) or _ORDINAL[m.group(2)])
+        yr = m.group(3)
+        year = int(yr) if yr and yr.isdigit() else today.year - 1 if yr == "last year" else (_year_qualifier(q, today, default_year) or today.year)
+        start, end = (date(year, 1, 1), date(year, 7, 1)) if half == 1 else (date(year, 7, 1), date(year + 1, 1, 1))
+        return P(start, end, f"H{half} {year}")
+
+    # Indian financial year: "FY26", "FY 2025-26", "fy2025", "2025-26"
+    m = re.search(r"\bfy\s*(?:(?:20)?(\d\d))(?:\s*[-/]\s*(?:20)?(\d\d))?\b|\b(20\d\d)\s*[-/]\s*(\d\d)\b", q)
+    if m:
+        if m.group(3):
+            start_year = int(m.group(3))
+        else:
+            start_year = 2000 + int(m.group(1)) - (0 if m.group(2) else 1)   # "FY26" = 2025-26
+        s, e, label = _fy(start_year)
+        return P(s, e, label)
 
     # Quarters
+    m = re.search(r"\blast\s+quarter\s+of\s+(20\d\d)\b", q)
+    if m:
+        s, e = _quarter(int(m.group(1)), 4)
+        return P(s, e, f"Q4 {m.group(1)}")
     if re.search(r"\b(?:last|previous)\s+quarter\b", q):
-        return done("AND {col} >= DATE_TRUNC(quarter, DATEADD(quarter, -1, CURRENT_DATE())) "
-                    "AND {col} < DATE_TRUNC(quarter, CURRENT_DATE())", "last quarter")
+        cur_q = (today.month - 1) // 3 + 1
+        y, qn = (today.year, cur_q - 1) if cur_q > 1 else (today.year - 1, 4)
+        s, e = _quarter(y, qn)
+        return P(s, e, "last quarter")
     if re.search(r"\bthis\s+quarter\b", q):
-        return done("AND {col} >= DATE_TRUNC(quarter, CURRENT_DATE())", "this quarter to date")
+        s, _ = _quarter(today.year, (today.month - 1) // 3 + 1)
+        return P(s, tomorrow, "this quarter to date")
     m = re.search(r"\b(?:(20\d\d)\s+)?(?:q([1-4])|quarter\s*([1-4])|(first|second|third|fourth|1st|2nd|3rd|4th)\s+quarter)(?:\s+(?:of\s+)?(20\d\d))?\b", q)
     if m:
-        ordinal = {"first": 1, "1st": 1, "second": 2, "2nd": 2, "third": 3, "3rd": 3, "fourth": 4, "4th": 4}
-        qn = int(m.group(2) or m.group(3) or 0) or ordinal[m.group(4)]
-        year = int(m.group(1) or m.group(5) or 0)
-        if not year:
-            year = today.year - 1 if re.search(r"\b(?:last|previous)\s+year\b", q) else today.year
-        return done(_between("{col}", date(year, 3 * qn - 2, 1), _next_month(year, 3 * qn)), f"Q{qn} {year}")
+        qn = int(m.group(2) or m.group(3) or 0) or _ORDINAL[m.group(4)]
+        year = int(m.group(1) or m.group(5) or 0) or _year_qualifier(q, today, default_year) or today.year
+        s, e = _quarter(year, qn)
+        return P(s, e, f"Q{qn} {year}")
 
-    # Named months (checked before year phrases so "march last year" is March, not the whole year)
-    named = _named_months(q, today)
+    # Named months (before year phrases so "march last year" is March, not the whole year)
+    named = _named_months(q, today, default_year, may_is_month)
     if named:
-        return done(named.sql, named.label)
+        return P(named.start, named.end, named.label)
 
-    # Indian financial year: "FY26", "FY 2025-26", "fy2025" → April 2025 – March 2026
-    m = re.search(r"\bfy\s*(?:(20)?(\d\d))(?:\s*[-/]\s*(?:20)?(\d\d))?\b", q)
-    if m:
-        start_year = 2000 + int(m.group(2)) - (0 if m.group(3) else 1)  # "FY26" = 2025-26
-        return done(_between("{col}", date(start_year, 4, 1), date(start_year + 1, 4, 1)), f"FY {start_year}-{str(start_year + 1)[2:]}")
-
-    # Year span: "between 2025 and 2026"
+    # Year spans and open-ended years
     m = re.search(r"\b(20\d\d)\s*(?:-|to|and|through|until)\s*(20\d\d)\b", q)
     if m:
         y0, y1 = sorted((int(m.group(1)), int(m.group(2))))
-        return done(_between("{col}", date(y0, 1, 1), date(y1 + 1, 1, 1)), f"{y0}–{y1}")
-
-    # Bare calendar year: "revenue for 2025"
-    m = re.search(r"\b(?:in|for|of|during|year|since|from|until|till|to)\s+(20\d\d)\b|(?<![#\w])(?<!ticket )(?<!order )(?<!orders )(?<!sku )(?<!id )(?<!no\. )(?<!number )(20\d\d)\s*$", q)
+        return P(date(y0, 1, 1), date(y1 + 1, 1, 1), f"{y0}–{y1}")
+    m = re.search(r"\b(?:since|from)\s+(20\d\d)\b", q)
     if m:
-        year = int(m.group(1) or m.group(2))
-        return done(_between("{col}", date(year, 1, 1), date(year + 1, 1, 1)), str(year))
+        return P(date(int(m.group(1)), 1, 1), None, f"since {m.group(1)}")
+    m = re.search(r"\b(?:until|till|up to|through)\s+(20\d\d)\b", q)
+    if m:
+        return P(None, date(int(m.group(1)) + 1, 1, 1), f"up to the end of {m.group(1)}")
+    m = re.search(r"\bbefore\s+(20\d\d)\b", q)
+    if m:
+        return P(None, date(int(m.group(1)), 1, 1), f"before {m.group(1)}")
+    m = re.search(r"\b(?:in|for|of|during|year)\s+(20\d\d)\b|(?<![#\w])(?<!ticket )(?<!order )(?<!orders )(?<!sku )(?<!id )(?<!no\. )(?<!number )(20\d\d)\s*$", q)
+    if m:
+        y = int(m.group(1) or m.group(2))
+        return P(date(y, 1, 1), date(y + 1, 1, 1), str(y))
 
-    # Years
     if re.search(r"\b(?:last|previous)\s+year\b", q):
-        return done("AND {col} >= DATE_TRUNC(year, DATEADD(year, -1, CURRENT_DATE())) "
-                    "AND {col} < DATE_TRUNC(year, CURRENT_DATE())", "last year")
+        return P(date(today.year - 1, 1, 1), date(today.year, 1, 1), "last year")
     if word("this year", "year to date", "ytd", "annual", "yearly", "year"):
-        return done("AND {col} >= DATE_TRUNC(year, CURRENT_DATE())", "year to date")
+        return P(date(today.year, 1, 1), tomorrow, "year to date")
 
     # Weeks / months (calendar for "this", rolling otherwise)
     if re.search(r"\bthis\s+week\b", q):
-        return done("AND {col} >= DATE_TRUNC(week, CURRENT_DATE())", "this week to date")
+        return P(today - timedelta(days=today.weekday()), tomorrow, "this week to date")
     if word("week", "weekly"):
-        return done("AND {col}::DATE >= DATEADD(day, -7, CURRENT_DATE())", "the last 7 days")
+        return P(today - timedelta(days=7), None, "the last 7 days")
     if re.search(r"\bthis\s+month\b", q):
-        return done("AND {col} >= DATE_TRUNC(month, CURRENT_DATE())", "this month to date")
+        return P(today.replace(day=1), tomorrow, "this month to date")
     if re.search(r"\b(?:last|previous)\s+month\b", q):
-        return done("AND {col} >= DATE_TRUNC(month, DATEADD(month, -1, CURRENT_DATE())) "
-                    "AND {col} < DATE_TRUNC(month, CURRENT_DATE())", "last month")
+        return P(_add_months(today, -1), today.replace(day=1), "last month")
     if word("month", "monthly"):
-        return done("AND {col}::DATE >= DATEADD(day, -30, CURRENT_DATE())", "the last 30 days")
+        return P(today - timedelta(days=30), None, "the last 30 days")
 
-    return done("AND {col}::DATE >= DATEADD(day, -30, CURRENT_DATE())", DEFAULT_LABEL, recognised=False)
+    return P(today - timedelta(days=30), None, DEFAULT_LABEL, recognised=False)
+
+
+def _shift_months(d: date, n: int) -> date:
+    """d moved by n months, clamped to the month length."""
+    first = _add_months(d.replace(day=1), n)
+    last_day = (_add_months(first, 1) - timedelta(days=1)).day
+    return first.replace(day=min(d.day, last_day))
+
+
+def _shift_years(d: date, n: int) -> date:
+    return _shift_months(d, 12 * n)
+
+
+# ── comparisons ──────────────────────────────────────────────────────────────
+_VS_RE = re.compile(r"\b(?:vs\.?|versus|compared\s+(?:to|with)|against)\b")
 
 
 def combined_window(question: str, col: str = "o.order_placed_at", today: date | None = None):
-    """For "A vs B" questions, the window spanning both named periods (earliest start to latest end).
+    """For "A vs B" questions, the window spanning both named periods.
 
-    Returns (sql, label) or (None, None) when fewer than two periods are named. Only explicit
-    calendar periods (quarters, months, years) and this/last quarter are combined.
+    Returns (sql, label) or (None, None) when fewer than two periods are named. A year or
+    "last year" written anywhere in the question applies to any side that has none.
     """
     q = question.lower()
-    parts = re.split(r"\b(?:vs\.?|versus|compared (?:to|with)|against|and)\b", q)
+    today = today or today_local()
+    parts = [p for p in _VS_RE.split(q) if p.strip()]
     if len(parts) < 2:
         return None, None
-    windows = [parse_period(p, col=col, today=today) for p in parts]
+    ym = re.search(r"\b(20\d\d)\b", q)
+    default_year = int(ym.group(1)) if ym else (today.year - 1 if re.search(r"\b(?:last|previous)\s+year\b", q) else None)
+    may_is_month = _MAY_CONTEXT_RE.search(q) is not None
+    windows = [parse_period(p, col=col, today=today, default_year=default_year, may_is_month=may_is_month) for p in parts]
     windows = [w for w in windows if w.recognised]
     if len(windows) < 2:
         return None, None
-    starts, ends, labels = [], [], []
-    for w in windows:
-        m = re.search(r">= '(\d{4}-\d{2}-\d{2})'(?: AND \S+ < '(\d{4}-\d{2}-\d{2})')?", w.sql)
-        if m:
-            starts.append(m.group(1)); ends.append(m.group(2))
-        elif "quarter" in w.label:
-            # this/last quarter: use Snowflake expressions; fall back to spanning the two quarters
-            starts.append(None); ends.append(None)
-        labels.append(w.label)
-    if any(s is None for s in starts):
-        return (f"AND {col} >= DATE_TRUNC(quarter, DATEADD(quarter, -1, CURRENT_DATE()))",
-                " vs ".join(labels))
-    start = min(starts)
-    end = max(e for e in ends if e) if any(ends) else None
-    sql = f"AND {col} >= '{start}'" + (f" AND {col} < '{end}'" if end else "")
-    return sql, " vs ".join(labels)
+    starts = [w.start for w in windows if w.start is not None]
+    start = min(starts) if starts else None
+    end = None if any(w.end is None for w in windows) else max(w.end for w in windows)
+    combined = Period(start, end, " vs ".join(w.label for w in windows), col)
+    return combined.sql, combined.label

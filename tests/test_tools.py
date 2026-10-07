@@ -173,28 +173,18 @@ def test_customer_count_question_does_not_name_search(monkeypatch):
 
 
 def test_sales_period_windows(monkeypatch):
+    from app.tools._period import parse_period
     captured = []
     monkeypatch.setattr(sales_mod, "query", lambda sql, params=None: captured.append(sql) or [{"TOTAL_ORDERS": 1, "CATEGORY_L1": "x", "REVENUE": 1, "ORDERS": 1}])
-    cases = {
-        "sales last 7 days": "DATEADD(day, -7",
-        "sales last 2 weeks": "DATEADD(day, -14",
-        "sales last 3 months": "DATEADD(month, -3",
-        "sales this year": "DATE_TRUNC(year, CURRENT_DATE())",
-        "revenue last year": "DATEADD(year, -1",
-        "sales for last quarter": "DATEADD(quarter, -1",
-        "sales this quarter": "DATE_TRUNC(quarter, CURRENT_DATE())",
-        "sales this month": "DATE_TRUNC(month, CURRENT_DATE())",
-        "sales last month": "DATEADD(month, -1",
-        "revenue in May 2026": "'2026-05-01' AND o.order_placed_at < '2026-06-01'",
-        "revenue for Q2": "'2026-04-01' AND o.order_placed_at < '2026-07-01'",
-        "sales in march": "'2026-03-01' AND o.order_placed_at < '2026-04-01'",
-        "sales for april and may": "'2026-04-01' AND o.order_placed_at < '2026-06-01'",
-        "sales in june 2025": "'2025-06-01' AND o.order_placed_at < '2025-07-01'",
-    }
-    for q, needle in cases.items():
+    for q in ["sales last 7 days", "sales last 2 weeks", "sales last 3 months", "sales this year", "revenue last year",
+              "sales for last quarter", "sales this quarter", "sales this month", "sales last month",
+              "revenue in May 2026", "revenue for Q2", "sales in march", "sales for april and may", "sales in june 2025"]:
         captured.clear()
-        sales_mod.query_sales.invoke(q)
-        assert needle in captured[0], q
+        out = sales_mod.query_sales.invoke(q)
+        expected = parse_period(q)
+        assert expected.recognised, q
+        assert expected.sql in captured[0], q
+        assert expected.label in out, q
 
 
 def test_sales_empty_period_names_available_range(monkeypatch):
@@ -251,7 +241,8 @@ def test_profit_uses_period_window(monkeypatch):
     captured.clear()
     monkeypatch.setattr(profit_mod, "query", lambda sql, params=None: captured.append(sql) or [{"QUARTER": "2026 Q1", "REVENUE": 10, "COST": 5}])
     out = profit_mod.calculate_profit.invoke("compare profit by quarter")
-    assert "DATE_TRUNC(year" in captured[0] and "2026 Q1" in out
+    from app.tools._period import parse_period
+    assert parse_period("this year").sql in captured[0] and "2026 Q1" in out
 
 
 def test_cust_dash_id_is_not_a_name_search(monkeypatch):

@@ -1,6 +1,7 @@
 from langchain_core.tools import tool
 
 from app.snowflake_client import query
+from app.tools._period import parse_period
 from app.tools._text import escape_like, has_word, tokens
 
 
@@ -20,7 +21,8 @@ def lookup_customer(question: str) -> str:
     q_ids = re.sub(
         r'\b(?:order|orders|item|items|invoice|invoices|ticket|tickets|sku|skus|product|products)'
         r'(?:\s+(?:number|no\.?))?\s*(?:id\s*)?[:#]?\s*\d{1,6}\b', ' ', q)
-    id_match = (re.search(r'\bcust[-_\s]*0*(\d{1,7})\b', q_ids)  # seeded ids look like CUST000042
+    cust_match = re.search(r'\bcust[-_\s]*0*(\d{1,7})\b', q_ids)  # seeded ids look like CUST000042
+    id_match = (cust_match
                 or re.search(r'\bcustomer[\s_]*(?:id|number|no\.?)?\s*[:#]?\s*(\d{1,7})\b', q_ids)
                 or re.search(r'(?:#|\bid\s*[:#]?)\s*(\d{1,7})\b', q_ids))
     wants_top = id_match is None and has_word(q, "top", "best", "most", "highest")
@@ -34,7 +36,8 @@ def lookup_customer(question: str) -> str:
             FROM CONFORMED.DIM_CUSTOMER
             WHERE customer_id IN (%s, %s) AND is_active = TRUE
         """, (cid, f"CUST{cid.zfill(6)}"))  # seeded ids look like CUST000042
-        if not rows:
+        if not rows and cust_match is None:
+            # A bare number may be the surrogate key; an explicit CUST id never is.
             rows = query("""
                 SELECT customer_sk, customer_id, full_name, email, phone_number,
                        date_of_birth, gender, city, state_code, pincode,
@@ -71,18 +74,20 @@ def lookup_customer(question: str) -> str:
         return result
 
     if wants_top:
-        rows = query("""
+        period = parse_period(q)
+        window = period.sql if period.recognised else ""
+        rows = query(f"""
             SELECT c.customer_sk, c.customer_id, c.full_name, c.email, c.phone_number,
                    COUNT(o.order_sk) AS order_count,
                    SUM(o.gmv_amount) AS total_spent
             FROM CONFORMED.DIM_CUSTOMER c
             JOIN CONFORMED.FACT_ORDER o ON c.customer_sk = o.customer_sk
-            WHERE c.is_active = TRUE AND o.order_status != 'CANCELLED'
+            WHERE c.is_active = TRUE AND o.order_status != 'CANCELLED' {window}
             GROUP BY c.customer_sk, c.customer_id, c.full_name, c.email, c.phone_number
             ORDER BY total_spent DESC
             LIMIT 5
         """)
-        lines = ["Top 5 Customers by Spending:"]
+        lines = [f"Top 5 Customers by Spending ({period.label if period.recognised else 'all time'}):"]
         for r in rows:
             lines.append(
                 f"  #{r['CUSTOMER_ID']} {r['FULL_NAME']} "

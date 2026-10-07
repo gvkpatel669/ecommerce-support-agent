@@ -17,8 +17,8 @@ def calculate_profit(question: str) -> str:
         # otherwise the asked window, or year to date when none was given.
         window, label = combined_window(q)
         if window is None:
-            window = period.sql if period.recognised else "AND o.order_placed_at >= DATE_TRUNC(year, CURRENT_DATE())"
-            label = period.label if period.recognised else "year to date"
+            fallback = period if period.recognised else parse_period("this year")
+            window, label = fallback.sql, fallback.label
         rows = query(f"""
             SELECT
                 YEAR(o.order_placed_at) || ' Q' || QUARTER(o.order_placed_at) AS quarter,
