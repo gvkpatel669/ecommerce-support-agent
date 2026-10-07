@@ -14,8 +14,10 @@ uvicorn app.main:app --port 8010
 ```
 
 `GET /health` is liveness; `GET /ready` also pings Snowflake. `POST /chat` takes
-`{"message": "..."}` or an OpenAI-style `{"messages": [...]}` and requires `X-API-Key` when
-`ECOMBOT_API_KEY` is set.
+`{"message": "..."}` or an OpenAI-style `{"messages": [...]}` and, when `ECOMBOT_API_KEY` is set,
+requires the key as `X-API-Key` or `Authorization: Bearer <key>`. `LOG_LEVEL` (default INFO)
+controls logging; `SNOWFLAKE_TIMEZONE` (default Asia/Kolkata) sets the session timezone used for
+"today"/"this month" style windows.
 
 ## Seed data
 
@@ -35,7 +37,7 @@ services.
 ## Tests
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -r requirements.txt -r requirements-dev.txt -c constraints.txt
 python -m pytest -q tests && python -m pyflakes app tests scripts
 ```
 

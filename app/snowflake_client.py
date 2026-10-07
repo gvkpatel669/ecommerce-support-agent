@@ -32,6 +32,8 @@ def _connect():
         login_timeout=10,
         network_timeout=30,
         client_session_keep_alive=True,
+        # Orders are stored in IST; make CURRENT_DATE()/DATE_TRUNC agree with the data.
+        session_parameters={"TIMEZONE": settings.SNOWFLAKE_TIMEZONE},
     )
 
 

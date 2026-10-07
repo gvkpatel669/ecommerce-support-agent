@@ -18,7 +18,8 @@ class Settings(BaseSettings):
     LLM_MAX_TOKENS: int = 1024
     # Optional shared secret for /chat. When empty the endpoint is open (local demo mode).
     ECOMBOT_API_KEY: SecretStr = SecretStr("")
-    APP_PORT: int = 8010
+    # Session timezone for date arithmetic; the seeded data is in IST.
+    SNOWFLAKE_TIMEZONE: str = "Asia/Kolkata"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

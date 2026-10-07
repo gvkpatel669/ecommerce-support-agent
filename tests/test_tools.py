@@ -110,9 +110,15 @@ def test_profit_handles_empty_data(monkeypatch):
 def test_customer_id_search_is_case_insensitive(monkeypatch):
     captured = {}
     monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: captured.update(sql=sql, params=params) or [])
+    seen = []
+    monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: seen.append((sql, params)) or [])
     cust_mod.lookup_customer.invoke("Look up customer CUST000042")
+    assert "customer_id IN (%s, %s)" in seen[0][0]
+    assert seen[0][1] == ("42", "CUST000042")
+    monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: captured.update(sql=sql, params=params) or [])
+    cust_mod.lookup_customer.invoke("find customer priya")
     assert "LOWER(customer_id) LIKE %s" in captured["sql"]
-    assert captured["params"][1] == "%cust000042%"
+    assert captured["params"][1] == "%priya%"
 
 
 def test_order_number_is_not_a_customer_id(monkeypatch):
@@ -227,3 +233,22 @@ def test_place_and_status_words_are_not_names(monkeypatch):
     assert calls == []
     cust_mod.lookup_customer.invoke("order #42 status for customer")
     assert calls == []
+
+
+def test_cust_prefixed_id_is_a_profile_lookup(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: calls.append((sql, params)) or [])
+    cust_mod.lookup_customer.invoke("customer_id: CUST000042")
+    assert calls and "customer_id IN" in calls[0][0] and calls[0][1] == ("42", "CUST000042")
+
+
+def test_profit_uses_period_window(monkeypatch):
+    import app.tools.calculate_profit as profit_mod
+    captured = []
+    monkeypatch.setattr(profit_mod, "query", lambda sql, params=None: captured.append(sql) or [{"REVENUE": 10, "COST": 5}])
+    out = profit_mod.calculate_profit.invoke("profit in march")
+    assert "'2026-03-01'" in captured[0] and "March 2026" in out
+    captured.clear()
+    monkeypatch.setattr(profit_mod, "query", lambda sql, params=None: captured.append(sql) or [{"QUARTER": "2026 Q1", "REVENUE": 10, "COST": 5}])
+    out = profit_mod.calculate_profit.invoke("compare profit by quarter")
+    assert "DATE_TRUNC(year" in captured[0] and "2026 Q1" in out

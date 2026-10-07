@@ -20,8 +20,9 @@ def lookup_customer(question: str) -> str:
     q_ids = re.sub(
         r'\b(?:order|orders|item|items|invoice|invoices|ticket|tickets|sku|skus|product|products)'
         r'(?:\s+(?:number|no\.?))?\s*(?:id\s*)?[:#]?\s*\d{1,6}\b', ' ', q)
-    id_match = (re.search(r'\bcustomer[\s_]*(?:id|number|no\.?)?\s*[:#]?\s*(\d{1,6})\b', q_ids)
-                or re.search(r'(?:#|\bid\s*[:#]?)\s*(\d{1,6})\b', q_ids))
+    id_match = (re.search(r'\bcust0*(\d{1,7})\b', q_ids)  # seeded ids look like CUST000042
+                or re.search(r'\bcustomer[\s_]*(?:id|number|no\.?)?\s*[:#]?\s*(\d{1,7})\b', q_ids)
+                or re.search(r'(?:#|\bid\s*[:#]?)\s*(\d{1,7})\b', q_ids))
     wants_top = id_match is None and has_word(q, "top", "best", "most", "highest")
 
     if id_match:
