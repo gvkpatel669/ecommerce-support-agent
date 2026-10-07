@@ -8,6 +8,7 @@ Populates 11 tables with realistic ecommerce data designed to surface 3 planted 
 """
 
 import os
+import sys
 import snowflake.connector
 import random
 from datetime import date, datetime, timedelta
@@ -25,9 +26,11 @@ def _conn_params() -> dict:
         "password": os.environ.get("SNOWFLAKE_PASSWORD", ""),
         "role": os.environ.get("SNOWFLAKE_ROLE") or None,
         "warehouse": os.environ.get("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
-        "database": "ECOMM_DATA_LAKE",
+        "database": DATABASE,
         "schema": "CONFORMED",
     }
+
+DATABASE = os.environ.get("SNOWFLAKE_DATABASE", "ECOMM_DATA_LAKE")
 
 IST = pytz.timezone("Asia/Kolkata")
 NOW_IST = datetime.now(IST)
@@ -49,7 +52,7 @@ def rand_date(start, end):
 def batch_insert(cur, table, columns, rows, batch_size=500):
     col_str = ", ".join(columns)
     placeholders = ", ".join(["%s"] * len(columns))
-    sql = f"INSERT INTO ECOMM_DATA_LAKE.CONFORMED.{table} ({col_str}) VALUES ({placeholders})"
+    sql = f"INSERT INTO {DATABASE}.CONFORMED.{table} ({col_str}) VALUES ({placeholders})"
     inserted = 0
     for i in range(0, len(rows), batch_size):
         batch = rows[i : i + batch_size]
@@ -202,12 +205,12 @@ def seed_dim_category(cur):
     # Insert and capture assigned SKs
     col_str = ", ".join(cols)
     placeholders = ", ".join(["%s"] * len(cols))
-    sql = f"INSERT INTO ECOMM_DATA_LAKE.CONFORMED.DIM_CATEGORY ({col_str}) VALUES ({placeholders})"
+    sql = f"INSERT INTO {DATABASE}.CONFORMED.DIM_CATEGORY ({col_str}) VALUES ({placeholders})"
     cur.executemany(sql, rows)
     print(f"  ✓ DIM_CATEGORY: {len(rows)} rows inserted")
 
     # Fetch back SKs keyed by category_id
-    cur.execute("SELECT CATEGORY_SK, CATEGORY_ID FROM ECOMM_DATA_LAKE.CONFORMED.DIM_CATEGORY")
+    cur.execute(f"SELECT CATEGORY_SK, CATEGORY_ID FROM {DATABASE}.CONFORMED.DIM_CATEGORY")
     cat_map = {row[1]: row[0] for row in cur.fetchall()}
     return cat_map, categories
 
@@ -244,7 +247,7 @@ def seed_dim_merchant(cur):
         "CREATED_WHEN","UPDATED_WHEN","INGESTED_AT",
     ]
     batch_insert(cur, "DIM_MERCHANT", cols, rows)
-    cur.execute("SELECT MERCHANT_SK, MERCHANT_ID FROM ECOMM_DATA_LAKE.CONFORMED.DIM_MERCHANT")
+    cur.execute(f"SELECT MERCHANT_SK, MERCHANT_ID FROM {DATABASE}.CONFORMED.DIM_MERCHANT")
     return {row[1]: row[0] for row in cur.fetchall()}
 
 # ── 4. DIM_CHANNEL ────────────────────────────────────────────────────────────
@@ -269,7 +272,7 @@ def seed_dim_channel(cur):
         "CREATED_WHEN","UPDATED_WHEN",
     ]
     batch_insert(cur, "DIM_CHANNEL", cols, rows)
-    cur.execute("SELECT CHANNEL_SK, CHANNEL_ID FROM ECOMM_DATA_LAKE.CONFORMED.DIM_CHANNEL")
+    cur.execute(f"SELECT CHANNEL_SK, CHANNEL_ID FROM {DATABASE}.CONFORMED.DIM_CHANNEL")
     return {row[1]: row[0] for row in cur.fetchall()}
 
 # ── 5. DIM_LOCATION ───────────────────────────────────────────────────────────
@@ -313,7 +316,7 @@ def seed_dim_location(cur):
         "CREATED_WHEN","UPDATED_WHEN",
     ]
     batch_insert(cur, "DIM_LOCATION", cols, rows)
-    cur.execute("SELECT LOCATION_SK, LOCATION_ID FROM ECOMM_DATA_LAKE.CONFORMED.DIM_LOCATION")
+    cur.execute(f"SELECT LOCATION_SK, LOCATION_ID FROM {DATABASE}.CONFORMED.DIM_LOCATION")
     return {row[1]: row[0] for row in cur.fetchall()}
 
 # ── 6. DIM_CUSTOMER ───────────────────────────────────────────────────────────
@@ -361,7 +364,7 @@ def seed_dim_customer(cur):
         "CREATED_WHEN","UPDATED_WHEN","INGESTED_AT",
     ]
     batch_insert(cur, "DIM_CUSTOMER", cols, rows)
-    cur.execute("SELECT CUSTOMER_SK, CUSTOMER_ID FROM ECOMM_DATA_LAKE.CONFORMED.DIM_CUSTOMER")
+    cur.execute(f"SELECT CUSTOMER_SK, CUSTOMER_ID FROM {DATABASE}.CONFORMED.DIM_CUSTOMER")
     return {row[1]: row[0] for row in cur.fetchall()}
 
 # ── 7. DIM_PRODUCT ────────────────────────────────────────────────────────────
@@ -473,7 +476,7 @@ def seed_dim_product(cur, cat_map, cat_defs, merchant_sk_map):
         "CREATED_WHEN","UPDATED_WHEN","INGESTED_AT",
     ]
     batch_insert(cur, "DIM_PRODUCT", cols, rows)
-    cur.execute("SELECT PRODUCT_SK, PRODUCT_ID, CATEGORY_L1, MRP FROM ECOMM_DATA_LAKE.CONFORMED.DIM_PRODUCT")
+    cur.execute(f"SELECT PRODUCT_SK, PRODUCT_ID, CATEGORY_L1, MRP FROM {DATABASE}.CONFORMED.DIM_PRODUCT")
     prod_data = {}
     for row in cur.fetchall():
         prod_data[row[1]] = {"sk": row[0], "cat_l1": row[2], "mrp": float(row[3])}
@@ -610,7 +613,7 @@ def seed_orders_and_items(cur, customer_sk_map, channel_sk_map, merchant_sk_map,
     batch_insert(cur, "FACT_ORDER", order_cols, order_rows)
 
     # Fetch back order SKs (assigned by sequence)
-    cur.execute("SELECT ORDER_SK, ORDER_ID FROM ECOMM_DATA_LAKE.CONFORMED.FACT_ORDER ORDER BY ORDER_SK")
+    cur.execute(f"SELECT ORDER_SK, ORDER_ID FROM {DATABASE}.CONFORMED.FACT_ORDER ORDER BY ORDER_SK")
     order_sk_map = {row[1]: row[0] for row in cur.fetchall()}
 
     # Fix item_rows — replace sequential placeholder with real order_sk
@@ -638,7 +641,7 @@ def seed_orders_and_items(cur, customer_sk_map, channel_sk_map, merchant_sk_map,
     batch_insert(cur, "FACT_ORDER_ITEM", item_cols, fixed_item_rows)
 
     # Fetch item SKs for refunds
-    cur.execute("SELECT ORDER_ITEM_SK, ORDER_ITEM_ID FROM ECOMM_DATA_LAKE.CONFORMED.FACT_ORDER_ITEM")
+    cur.execute(f"SELECT ORDER_ITEM_SK, ORDER_ITEM_ID FROM {DATABASE}.CONFORMED.FACT_ORDER_ITEM")
     item_sk_map = {row[1]: row[0] for row in cur.fetchall()}
 
     return order_sk_map, item_sk_map, order_meta
@@ -757,10 +760,15 @@ def seed_inventory(cur, prod_data, location_sk_map):
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     print("=" * 60)
-    print("Connecting to Snowflake ECOMM_DATA_LAKE.CONFORMED...")
+    print(f"Connecting to Snowflake {DATABASE}.CONFORMED...")
     conn = snowflake.connector.connect(**_conn_params())
     cur = conn.cursor()
     print("Connected.\n")
+
+    # The seed appends; running it twice would duplicate customers and orders.
+    cur.execute(f"SELECT COUNT(*) FROM {DATABASE}.CONFORMED.DIM_CUSTOMER")
+    if cur.fetchone()[0] and "--force" not in sys.argv:
+        raise SystemExit("DIM_CUSTOMER already has rows; truncate the CONFORMED tables first or pass --force to append anyway")
 
     try:
         # 1. DIM_DATE
@@ -813,7 +821,7 @@ def main():
             "DIM_LOCATION", "DIM_CUSTOMER", "DIM_PRODUCT",
             "FACT_ORDER", "FACT_ORDER_ITEM", "FACT_REFUND", "FACT_INVENTORY_SNAPSHOT",
         ]:
-            cur.execute(f"SELECT COUNT(*) FROM ECOMM_DATA_LAKE.CONFORMED.{tbl}")
+            cur.execute(f"SELECT COUNT(*) FROM {DATABASE}.CONFORMED.{tbl}")
             cnt = cur.fetchone()[0]
             print(f"  {tbl:<35} {cnt:>6} rows")
 

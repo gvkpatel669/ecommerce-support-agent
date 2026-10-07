@@ -1,9 +1,7 @@
-import re
-
 from langchain_core.tools import tool
 
 from app.snowflake_client import query
-from app.tools._text import has_word
+from app.tools._period import parse_period
 
 
 @tool
@@ -12,33 +10,8 @@ def query_sales(question: str) -> str:
     Use this for questions about revenue, sales, orders, GMV, and trends."""
     q = question.lower()
 
-    def has(*words):
-        return has_word(q, *words)
-
-    # Determine time period
-    period_filter = ""
-    if has("today"):
-        period_filter = "AND o.order_placed_at::DATE = CURRENT_DATE()"
-    elif has("yesterday"):
-        period_filter = "AND o.order_placed_at::DATE = CURRENT_DATE() - 1"
-    elif (m := re.search(r"\b(?:last|past)\s+(\d{1,3})\s+days?\b", q)):
-        period_filter = f"AND o.order_placed_at::DATE >= DATEADD(day, -{int(m.group(1))}, CURRENT_DATE())"
-    elif has("week", "weekly"):
-        period_filter = "AND o.order_placed_at::DATE >= DATEADD(day, -7, CURRENT_DATE())"
-    elif re.search(r"\blast\s+quarter\b", q):
-        period_filter = "AND o.order_placed_at >= DATE_TRUNC(quarter, DATEADD(quarter, -1, CURRENT_DATE())) AND o.order_placed_at < DATE_TRUNC(quarter, CURRENT_DATE())"
-    elif has("year", "yearly", "ytd", "annual"):
-        period_filter = "AND o.order_placed_at >= DATE_TRUNC(year, CURRENT_DATE())"
-    elif has("month", "monthly"):
-        period_filter = "AND o.order_placed_at::DATE >= DATEADD(month, -1, CURRENT_DATE())"
-    elif has("q1", "quarter 1", "jan", "january", "feb", "february", "mar", "march"):
-        period_filter = "AND o.order_placed_at >= '2026-01-01' AND o.order_placed_at < '2026-04-01'"
-    elif re.search(r"\b(?:in|for|of|during|since|until)\s+may\b|\bmay\s+20\d\d\b", q) and not has("q2", "quarter 2"):
-        period_filter = "AND o.order_placed_at >= '2026-05-01' AND o.order_placed_at < '2026-06-01'"
-    elif has("q2", "quarter 2", "apr", "april", "jun", "june"):
-        period_filter = "AND o.order_placed_at >= '2026-04-01' AND o.order_placed_at < '2026-07-01'"
-    else:
-        period_filter = "AND o.order_placed_at::DATE >= DATEADD(day, -30, CURRENT_DATE())"
+    period = parse_period(q)
+    period_filter = period.sql
 
     # Summary
     rows = query(f"""
@@ -55,11 +28,15 @@ def query_sales(question: str) -> str:
     """)
 
     if not rows or rows[0].get("TOTAL_ORDERS", 0) == 0:
-        return "No sales data found for the specified period."
+        span = query("SELECT MIN(order_placed_at::DATE) AS first_day, MAX(order_placed_at::DATE) AS last_day FROM CONFORMED.FACT_ORDER")
+        if span and span[0].get("FIRST_DAY"):
+            return (f"No sales data found for {period.label}. "
+                    f"Order data is available from {span[0]['FIRST_DAY']} to {span[0]['LAST_DAY']}.")
+        return f"No sales data found for {period.label}."
 
     r = rows[0]
     result = (
-        f"Sales Summary ({r.get('PERIOD_START', 'N/A')} to {r.get('PERIOD_END', 'N/A')}):\n"
+        f"Sales Summary for {period.label} ({r.get('PERIOD_START', 'N/A')} to {r.get('PERIOD_END', 'N/A')}):\n"
         f"  Total Orders: {(r.get('TOTAL_ORDERS') or 0):,}\n"
         f"  GMV: ₹{(r.get('TOTAL_GMV') or 0):,.2f}\n"
         f"  Net Revenue: ₹{(r.get('TOTAL_REVENUE') or 0):,.2f}\n"

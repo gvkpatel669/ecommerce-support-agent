@@ -17,9 +17,11 @@ def lookup_customer(question: str) -> str:
     # A bare "#N" is a customer only when it is not an order/item/invoice number.
     # Order/item/invoice numbers are removed first so "order #42" can never be read as a
     # customer. Then "customer 42" / "customer id 42" / "customer #42" wins over a bare "#N".
-    q_ids = re.sub(r'\b(?:order|orders|item|items|invoice|invoices)(?:\s+number)?\s*(?:id\s*)?#?\s*\d{1,6}\b', ' ', q)
-    id_match = (re.search(r'\bcustomer\s*(?:id\s*)?#?\s*(\d{1,6})\b', q_ids)
-                or re.search(r'(?:#|\bid\s*#?)\s*(\d{1,6})\b', q_ids))
+    q_ids = re.sub(
+        r'\b(?:order|orders|item|items|invoice|invoices|ticket|tickets|sku|skus|product|products)'
+        r'(?:\s+(?:number|no\.?))?\s*(?:id\s*)?[:#]?\s*\d{1,6}\b', ' ', q)
+    id_match = (re.search(r'\bcustomer[\s_]*(?:id|number|no\.?)?\s*[:#]?\s*(\d{1,6})\b', q_ids)
+                or re.search(r'(?:#|\bid\s*[:#]?)\s*(\d{1,6})\b', q_ids))
     wants_top = id_match is None and has_word(q, "top", "best", "most", "highest")
 
     if id_match:
@@ -29,8 +31,8 @@ def lookup_customer(question: str) -> str:
                    date_of_birth, gender, city, state_code, pincode,
                    loyalty_tier, loyalty_points, customer_segment, first_order_date
             FROM CONFORMED.DIM_CUSTOMER
-            WHERE customer_id = %s AND is_active = TRUE
-        """, (cid,))
+            WHERE customer_id IN (%s, %s) AND is_active = TRUE
+        """, (cid, f"CUST{cid.zfill(6)}"))  # seeded ids look like CUST000042
         if not rows:
             rows = query("""
                 SELECT customer_sk, customer_id, full_name, email, phone_number,
@@ -95,11 +97,14 @@ def lookup_customer(question: str) -> str:
         "please", "orders", "order", "profile", "named", "called", "give", "with", "and", "his", "her",
         "how", "many", "much", "have", "has", "does", "are", "there", "which", "where", "when", "from",
         "all", "our", "your", "their", "number", "count", "total", "phone", "email", "address", "you",
+        "status", "this", "that", "these", "those", "any", "some", "recent", "latest", "new", "active",
     }
+    # "customers in Mumbai" names a place, not a person: drop the word after in/from/at/near.
+    q_names = re.sub(r"\b(?:in|from|at|near|within)\s+\w+", " ", q)
     # Aggregate questions ("how many customers do we have?") have no name to search for.
     if has_word(q, "many", "count", "total") and not has_word(q, "named", "called"):
         return "I can look up a customer by ID (e.g., #42) or name, or list 'top customers'; customer counts are not available here."
-    name_words = [w for w in tokens(q) if len(w) > 2 and w not in stopwords]
+    name_words = [w for w in tokens(q_names) if len(w) > 2 and w not in stopwords]
 
     if name_words:
         name = name_words[0]

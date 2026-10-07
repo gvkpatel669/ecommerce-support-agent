@@ -54,7 +54,7 @@ def test_explicit_id_wins_over_most_recent(monkeypatch):
     calls = []
     monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: calls.append(sql) or [])
     cust_mod.lookup_customer.invoke("show the most recent orders for customer #42")
-    assert any("customer_id = %s" in sql for sql in calls)
+    assert any("customer_id IN (%s, %s)" in sql for sql in calls)
     assert not any("GROUP BY" in sql for sql in calls)
 
 
@@ -86,7 +86,7 @@ def test_laptop_is_not_a_top_customers_request(monkeypatch):
     calls = []
     monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: calls.append(sql) or [])
     cust_mod.lookup_customer.invoke("customer #42 returned a laptop")
-    assert any("customer_id = %s" in sql for sql in calls)
+    assert any("customer_id IN (%s, %s)" in sql for sql in calls)
     assert not any("GROUP BY" in sql for sql in calls)
 
 
@@ -155,7 +155,7 @@ def test_explicit_customer_ids_are_found(monkeypatch, question, expected):
     calls = []
     monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: calls.append((sql, params)) or [])
     cust_mod.lookup_customer.invoke(question)
-    assert calls and calls[0][1] == (expected,)
+    assert calls and calls[0][1][0] == expected
 
 
 def test_customer_count_question_does_not_name_search(monkeypatch):
@@ -168,15 +168,62 @@ def test_customer_count_question_does_not_name_search(monkeypatch):
 
 def test_sales_period_windows(monkeypatch):
     captured = []
-    monkeypatch.setattr(sales_mod, "query", lambda sql, params=None: captured.append(sql) or [{"TOTAL_ORDERS": 0}])
+    monkeypatch.setattr(sales_mod, "query", lambda sql, params=None: captured.append(sql) or [{"TOTAL_ORDERS": 1, "CATEGORY_L1": "x", "REVENUE": 1, "ORDERS": 1}])
     cases = {
         "sales last 7 days": "DATEADD(day, -7",
-        "sales this year": "DATE_TRUNC(year",
+        "sales last 2 weeks": "DATEADD(day, -14",
+        "sales last 3 months": "DATEADD(month, -3",
+        "sales this year": "DATE_TRUNC(year, CURRENT_DATE())",
+        "revenue last year": "DATEADD(year, -1",
         "sales for last quarter": "DATEADD(quarter, -1",
-        "revenue in May 2026": "'2026-05-01'",
-        "revenue for Q2": "'2026-04-01'",
+        "sales this quarter": "DATE_TRUNC(quarter, CURRENT_DATE())",
+        "sales this month": "DATE_TRUNC(month, CURRENT_DATE())",
+        "sales last month": "DATEADD(month, -1",
+        "revenue in May 2026": "'2026-05-01' AND o.order_placed_at < '2026-06-01'",
+        "revenue for Q2": "'2026-04-01' AND o.order_placed_at < '2026-07-01'",
+        "sales in march": "'2026-03-01' AND o.order_placed_at < '2026-04-01'",
+        "sales for april and may": "'2026-04-01' AND o.order_placed_at < '2026-06-01'",
+        "sales in june 2025": "'2025-06-01' AND o.order_placed_at < '2025-07-01'",
     }
     for q, needle in cases.items():
         captured.clear()
         sales_mod.query_sales.invoke(q)
         assert needle in captured[0], q
+
+
+def test_sales_empty_period_names_available_range(monkeypatch):
+    def fake_query(sql, params=None):
+        if "first_day" in sql.lower():
+            return [{"FIRST_DAY": "2026-01-01", "LAST_DAY": "2026-06-30"}]
+        return [{"TOTAL_ORDERS": 0}]
+    monkeypatch.setattr(sales_mod, "query", fake_query)
+    out = sales_mod.query_sales.invoke("sales last 7 days")
+    assert "last 7 days" in out and "2026-01-01" in out and "2026-06-30" in out
+
+
+@pytest.mark.parametrize("question,expected", [
+    ("customer number 42", "42"),
+    ("customer id: 42", "42"),
+    ("customer_id 42", "42"),
+])
+def test_customer_id_phrasings(monkeypatch, question, expected):
+    calls = []
+    monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: calls.append((sql, params)) or [])
+    cust_mod.lookup_customer.invoke(question)
+    assert calls and calls[0][1][0] == expected and calls[0][1][1] == f"CUST{expected.zfill(6)}"
+
+
+def test_ticket_number_is_not_a_customer(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: calls.append(sql) or [])
+    cust_mod.lookup_customer.invoke("ticket #5 for customer")
+    assert not any("customer_id IN" in sql for sql in calls)
+
+
+def test_place_and_status_words_are_not_names(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: calls.append((sql, params)) or [])
+    cust_mod.lookup_customer.invoke("customers in Mumbai")
+    assert calls == []
+    cust_mod.lookup_customer.invoke("order #42 status for customer")
+    assert calls == []
