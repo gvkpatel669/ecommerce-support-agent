@@ -1,6 +1,6 @@
 import logging
 import threading
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import snowflake.connector
 from snowflake.connector import errors as sf_errors
@@ -14,6 +14,8 @@ _lock = threading.Lock()
 
 # Snowflake error codes that mean the session is gone and a reconnect will help.
 _SESSION_EXPIRED_CODES = {390112, 390114, 390195}
+# Per-statement timeout (seconds) for warehouse queries; applied per execute, never to the session.
+QUERY_TIMEOUT_SECONDS = int(settings.SNOWFLAKE_QUERY_TIMEOUT_SECONDS)
 
 
 def _connect():
@@ -21,7 +23,7 @@ def _connect():
         account=settings.SNOWFLAKE_ACCOUNT,
         user=settings.SNOWFLAKE_USER,
         password=settings.SNOWFLAKE_PASSWORD.get_secret_value(),
-        role=settings.SNOWFLAKE_ROLE,
+        role=settings.SNOWFLAKE_ROLE or None,
         warehouse=settings.SNOWFLAKE_WAREHOUSE,
         database=settings.SNOWFLAKE_DATABASE,
         schema=settings.SNOWFLAKE_SCHEMA,
@@ -68,7 +70,7 @@ def query(sql: str, params=None) -> List[Dict]:
             conn = _get_connection()
             cursor = conn.cursor()
             try:
-                cursor.execute(sql, params) if params else cursor.execute(sql)
+                cursor.execute(sql, params, timeout=QUERY_TIMEOUT_SECONDS) if params else cursor.execute(sql, timeout=QUERY_TIMEOUT_SECONDS)
                 columns = [desc[0] for desc in cursor.description]
                 rows = cursor.fetchall()
                 return [dict(zip(columns, row)) for row in rows]
@@ -87,18 +89,29 @@ def query(sql: str, params=None) -> List[Dict]:
 
 
 def ping(timeout_seconds: float = 5.0) -> bool:
-    """Readiness probe: run SELECT 1 with a short statement timeout."""
-    try:
-        with _lock:
-            conn = _get_connection()
-            cursor = conn.cursor()
+    """Readiness probe: SELECT 1 with a per-statement timeout (the session is not altered).
+    Reconnects once when the shared session has expired, like query()."""
+    with _lock:
+        for attempt in range(2):
             try:
-                cursor.execute(f"ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = {int(timeout_seconds)}")
-                cursor.execute("SELECT 1")
-                cursor.fetchone()
-                return True
-            finally:
-                cursor.close()
-    except Exception as exc:
-        logger.warning("Snowflake readiness probe failed: %s", type(exc).__name__)
-        return False
+                conn = _get_connection()
+                cursor = conn.cursor()
+                try:
+                    cursor.execute("SELECT 1", timeout=int(timeout_seconds))
+                    cursor.fetchone()
+                    return True
+                finally:
+                    cursor.close()
+            except Exception as exc:
+                if attempt == 0 and _is_session_expired(exc):
+                    _reset_connection()
+                    continue
+                logger.warning("Snowflake readiness probe failed: %s", type(exc).__name__)
+                return False
+    return False
+
+
+def close() -> None:
+    """Close the shared connection (called at application shutdown)."""
+    with _lock:
+        _reset_connection()

@@ -4,9 +4,10 @@ import re
 # e.g. "profit on orders" goes to profit, not sales.
 _INTENT_PATTERNS = [
     ("profit", r"\b(?:profit|profits|margin|margins|earnings|cost|costs|net income)\b"),
+    # Customer questions often mention orders/revenue ("top customers by revenue"): check them first.
+    ("customer", r"\b(?:customer|customers|buyer|buyers|account|contact|who|lookup)\b"),
     ("sales", r"\b(?:revenue|sales|order|orders|trend|trends|gmv|refund|refunds)\b"),
     ("inventory", r"\b(?:stock|inventory|warehouse|available|availability|supply)\b"),
-    ("customer", r"\b(?:customer|customers|buyer|buyers|account|contact|who|lookup)\b"),
 ]
 _COMPILED = [(intent, re.compile(pattern, re.IGNORECASE)) for intent, pattern in _INTENT_PATTERNS]
 

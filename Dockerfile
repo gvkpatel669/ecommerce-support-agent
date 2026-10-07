@@ -6,8 +6,8 @@ WORKDIR /app
 ARG GIT_COMMIT_SHA=dev
 ENV GIT_COMMIT_SHA=${GIT_COMMIT_SHA}
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt constraints.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -c constraints.txt
 
 COPY app/ app/
 

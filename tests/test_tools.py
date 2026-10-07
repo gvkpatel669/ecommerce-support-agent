@@ -33,12 +33,30 @@ def test_like_wildcards_are_escaped(monkeypatch):
     captured = {}
 
     def fake_query(sql, params=None):
+        captured["sql"] = sql
         captured["params"] = params
         return []
 
     monkeypatch.setattr(cust_mod, "query", fake_query)
     cust_mod.lookup_customer.invoke("find buyer 100%")
-    assert captured["params"][0] == "%100\\%%"
+    # The tokenizer strips punctuation, so wildcards never reach LIKE; the ESCAPE clause stays as defence in depth.
+    assert captured["params"][0] == "%100%"
+    assert "ESCAPE '!'" in captured["sql"]  # a backslash literal would itself be an escape in Snowflake
+
+
+def test_name_search_strips_punctuation(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: captured.update(params=params) or [])
+    cust_mod.lookup_customer.invoke("Find customer Sharma.")
+    assert captured["params"][0] == "%sharma%"
+
+
+def test_laptop_is_not_a_top_customers_request(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: calls.append(sql) or [])
+    cust_mod.lookup_customer.invoke("customer #42 returned a laptop")
+    assert any("customer_id = %s" in sql for sql in calls)
+    assert not any("GROUP BY" in sql for sql in calls)
 
 
 def test_sales_period_uses_whole_words(monkeypatch):

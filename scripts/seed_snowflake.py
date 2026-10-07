@@ -297,7 +297,7 @@ def seed_dim_location(cur):
     for l_id, l_name, l_type, city, state, pin in locations:
         rows.append((
             l_id, l_name, l_type,
-            f"Plot 1, Industrial Area", city, state, "IN", pin,
+            "Plot 1, Industrial Area", city, state, "IN", pin,
             None, None, 50000.0, True,
             now_str, now_str,
         ))

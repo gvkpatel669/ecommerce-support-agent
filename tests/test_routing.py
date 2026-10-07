@@ -11,6 +11,8 @@ from app.routing import classify_intent
         ("wholesale pricing please", "general"),  # "who" must not match inside "wholesale"
         ("costume stock levels", "inventory"),
         ("who is customer #42", "customer"),
+        ("top customers by revenue", "customer"),
+        ("which customers placed the most orders", "customer"),
         ("hello there", "general"),
         ("", "general"),
     ],

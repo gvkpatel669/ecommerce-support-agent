@@ -1,6 +1,7 @@
 from langchain_core.tools import tool
 
 from app.snowflake_client import query
+from app.tools._text import has_word
 
 
 @tool
@@ -9,7 +10,7 @@ def calculate_profit(question: str) -> str:
     Use this for questions about profit, margins, earnings, and net income."""
     q = question.lower()
 
-    if any(w in q for w in ["q1", "q2", "quarter", "compare"]):
+    if has_word(q, "q1", "q2", "quarter", "quarterly", "compare", "comparison"):
         rows = query("""
             SELECT
                 CASE WHEN QUARTER(o.order_placed_at) = 1 THEN 'Q1' ELSE 'Q2' END AS quarter,
@@ -31,7 +32,7 @@ def calculate_profit(question: str) -> str:
             lines.append(f"  {r['QUARTER']}: Revenue ₹{r['REVENUE']:,.2f}, Cost ₹{r['COST']:,.2f}, Profit ₹{profit:,.2f} ({margin:.1f}% margin)")
         return "\n".join(lines)
 
-    if any(w in q for w in ["category", "categories", "breakdown"]):
+    if has_word(q, "category", "categories", "breakdown"):
         rows = query("""
             SELECT p.category_l1,
                    COALESCE(SUM(oi.unit_selling_price * oi.quantity), 0) AS revenue,

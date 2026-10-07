@@ -5,4 +5,3 @@ langchain-core==0.3.28
 langchain-openai==0.2.14
 snowflake-connector-python==3.12.3
 pydantic-settings==2.6.1
-pytz==2024.2

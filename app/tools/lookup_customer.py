@@ -1,6 +1,7 @@
 from langchain_core.tools import tool
 
 from app.snowflake_client import query
+from app.tools._text import has_word, tokens
 
 
 @tool
@@ -12,7 +13,7 @@ def lookup_customer(question: str) -> str:
     import re
 
     # "Top customers" questions must win over any digit in the text ("top 5 customers").
-    wants_top = any(w in q for w in ["top", "best", "most", "highest"])
+    wants_top = has_word(q, "top", "best", "most", "highest")
     # Only treat a number as a customer ID when it is explicitly marked (#42, id 42, customer 42).
     id_match = None if wants_top else re.search(r'(?:#|\bid\s*#?|\bcustomer\s*#?)\s*(\d{1,6})\b', q)
 
@@ -38,13 +39,13 @@ def lookup_customer(question: str) -> str:
 
         c = rows[0]
         result = (f"Customer #{c.get('CUSTOMER_ID', c.get('CUSTOMER_SK', '?'))}:\n"
-                  f"  Name: {c.get('FULL_NAME', 'N/A')}\n"
-                  f"  Email: {c.get('EMAIL', 'N/A')}\n"
-                  f"  Phone: {c.get('PHONE_NUMBER', 'N/A')}\n"
-                  f"  DOB: {c.get('DATE_OF_BIRTH', 'N/A')}\n"
-                  f"  Location: {c.get('CITY', '')}, {c.get('STATE_CODE', '')} {c.get('PINCODE', '')}\n"
+                  f"  Name: {c.get('FULL_NAME') or 'N/A'}\n"
+                  f"  Email: {c.get('EMAIL') or 'N/A'}\n"
+                  f"  Phone: {c.get('PHONE_NUMBER') or 'N/A'}\n"
+                  f"  DOB: {c.get('DATE_OF_BIRTH') or 'N/A'}\n"
+                  f"  Location: {c.get('CITY') or ''}, {c.get('STATE_CODE') or ''} {c.get('PINCODE') or ''}\n"
                   f"  Loyalty: {c.get('LOYALTY_TIER') or 'N/A'} ({(c.get('LOYALTY_POINTS') or 0):,.0f} pts)\n"
-                  f"  Segment: {c.get('CUSTOMER_SEGMENT', 'N/A')}\n")
+                  f"  Segment: {c.get('CUSTOMER_SEGMENT') or 'N/A'}\n")
 
         # Order history
         orders = query("""
@@ -83,18 +84,19 @@ def lookup_customer(question: str) -> str:
         return "\n".join(lines)
 
     # Search by name using parameterized query
-    name_words = [w for w in q.split() if len(w) > 2 and w not in
+    name_words = [w for w in tokens(q) if len(w) > 2 and w not in
         {"customer", "buyer", "account", "info", "details", "contact",
          "the", "for", "get", "find", "look", "who", "what", "show", "list"}]
 
     if name_words:
         name = name_words[-1]
         # Escape LIKE wildcards so "%" or "_" in the question cannot match every row.
-        like = "%" + re.sub(r"([\\%_])", r"\\\1", name) + "%"
+        # '!' is the escape char: a backslash literal is itself an escape in Snowflake strings.
+        like = "%" + re.sub(r"([!%_])", r"!\1", name) + "%"
         rows = query("""
             SELECT customer_sk, customer_id, full_name, email, phone_number
             FROM CONFORMED.DIM_CUSTOMER
-            WHERE (LOWER(full_name) LIKE %s ESCAPE '\\' OR customer_id LIKE %s ESCAPE '\\')
+            WHERE (LOWER(full_name) LIKE %s ESCAPE '!' OR customer_id LIKE %s ESCAPE '!')
               AND is_active = TRUE
             LIMIT 10
         """, (like, like))

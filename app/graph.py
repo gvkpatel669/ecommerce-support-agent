@@ -22,7 +22,7 @@ MAX_TOOL_OUTPUT_CHARS = 6000
 MAX_HISTORY_MESSAGES = 10
 
 # Reasoning models (e.g. MiniMax) may prefix answers with <think>…</think>; never expose it.
-_THINK_BLOCK = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
+_THINK_BLOCK = re.compile(r"<think>.*?(?:</think>\s*|\Z)", re.DOTALL | re.IGNORECASE)
 
 
 def strip_reasoning(text: str) -> str:
@@ -56,13 +56,19 @@ def _message_content(msg) -> str:
     return content if isinstance(content, str) else str(content or "")
 
 
-def last_user_message(messages: list) -> str:
-    """Return the content of the most recent user turn (falls back to the last message)."""
-    for msg in reversed(messages or []):
+def _last_user_index(messages: list) -> int:
+    for i in range(len(messages or []) - 1, -1, -1):
+        msg = messages[i]
         role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", None)
         if role == "user":
-            return _message_content(msg)
-    return _message_content(messages[-1]) if messages else ""
+            return i
+    return len(messages) - 1 if messages else -1
+
+
+def last_user_message(messages: list) -> str:
+    """Return the content of the most recent user turn (falls back to the last message)."""
+    idx = _last_user_index(messages)
+    return _message_content(messages[idx]) if idx >= 0 else ""
 
 
 @lru_cache(maxsize=1)
@@ -112,11 +118,13 @@ def format_response_node(state: AgentState) -> AgentState:
     tool_output = state["tool_output"]
 
     # Bounded prior turns so follow-ups like "and last week?" keep their context.
+    msgs = state["messages"] or []
+    idx = _last_user_index(msgs)
     history = [
         {"role": m.get("role", "user"), "content": _message_content(m)}
-        for m in (state["messages"] or [])[-MAX_HISTORY_MESSAGES:-1]
+        for m in msgs[max(0, idx - MAX_HISTORY_MESSAGES):idx]
         if isinstance(m, dict) and m.get("role") in ("user", "assistant")
-    ]
+    ] if idx > 0 else []
 
     prompt_messages = [
         {"role": "system", "content": SYSTEM_PROMPT},

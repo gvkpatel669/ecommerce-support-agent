@@ -1,19 +1,23 @@
+import hmac
 import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
 from typing import List, Literal, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.config import settings
 from app.graph import graph
 
 MAX_MESSAGE_CHARS = 4000
 MAX_MESSAGES = 20
+MAX_BODY_BYTES = 256 * 1024
+
+logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 logger = logging.getLogger("ecombot")
 
@@ -26,14 +30,37 @@ async def lifespan(_: FastAPI):
     if not settings.ECOMBOT_API_KEY.get_secret_value():
         logger.warning("ECOMBOT_API_KEY not set — /chat is unauthenticated (demo mode)")
     yield
+    from app.snowflake_client import close as close_snowflake
+    close_snowflake()
 
 
 app = FastAPI(title="Ecommerce Support Agent", version="1.0.0", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def limit_body_size(request: Request, call_next):
+    """Reject oversized bodies before they are parsed (chunked bodies are capped by the server)."""
+    length = request.headers.get("content-length")
+    if length is not None:
+        try:
+            if int(length) > MAX_BODY_BYTES:
+                return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
+    return await call_next(request)
+
+
 class Message(BaseModel):
     role: Literal["user", "assistant", "system"]
     content: str = Field(..., max_length=MAX_MESSAGE_CHARS)
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def _flatten_multipart(cls, value):
+        # OpenAI-style multi-part content: keep the text parts.
+        if isinstance(value, list):
+            return " ".join(p.get("text", "") for p in value if isinstance(p, dict)).strip()
+        return value
 
 
 class ChatRequest(BaseModel):
@@ -59,7 +86,7 @@ def require_api_key(
     presented = x_api_key
     if not presented and authorization and authorization.lower().startswith("bearer "):
         presented = authorization[7:].strip()
-    if presented != expected:
+    if not presented or not hmac.compare_digest(presented, expected):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 

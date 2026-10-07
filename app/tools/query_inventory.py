@@ -1,6 +1,7 @@
 from langchain_core.tools import tool
 
 from app.snowflake_client import query
+from app.tools._text import has_word
 
 
 @tool
@@ -9,7 +10,7 @@ def query_inventory(question: str) -> str:
     Use this for questions about stock, inventory, warehouse, and supply."""
     q = question.lower()
 
-    if any(w in q for w in ["low", "reorder", "critical", "out of stock"]):
+    if has_word(q, "low", "reorder", "critical", "out of stock"):
         rows = query("""
             SELECT p.product_name, p.category_l1, p.brand,
                    SUM(i.qty_available) AS available,
