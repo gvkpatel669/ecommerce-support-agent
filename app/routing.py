@@ -10,12 +10,14 @@ _PERSONAL_RE = re.compile(
     r"\b(?:my orders?|where is my|where'?s my|cancel my|track(?:ing)? my|return my|refund for my|"
     r"my refund|my delivery|my package|my parcel|my account|my payment|"
     r"cancel (?:an? |the |this )?order|return (?:an? |the |this )?order|refunds? (?:processed|take|issued)|"
+    r"track(?:ing)? (?:an? |the |this )?order|order\s*#?\s*\d+\s+status|status of (?:an? |the |this |my )?order\s*#?\s*\d+|"
     r"can i (?:get|have|request|return)|i want (?:a|to)|i'?d like|i would like|damaged|broken|wrong item|"
     r"not received|hasn'?t arrived)\b",
     re.IGNORECASE,
 )
 _POLICY_RE = re.compile(
-    r"\b(?:policy|policies|shipping cost|shipping charges|delivery charges|cost to ship|deliver(?:y|ed)? to|"
+    r"\b(?:policy|policies|shipping cost|shipping charges|delivery charges|cost to ship|cost of (?:shipping|delivery)|"
+    r"do you deliver to|delivery (?:time|charges?|options?) to|available for delivery|for delivery to|"
     r"customer support|support available|return window|warranty|terms and conditions)\b",
     re.IGNORECASE,
 )
@@ -35,8 +37,8 @@ _DATA_RE = re.compile(
 _INTENT_PATTERNS = [
     ("profit", r"\b(?:profit|profits|margin|margins|earnings|cost|costs|net income)\b"),
     # Customer questions often mention orders/revenue ("top customers by revenue"): check them first.
-    ("customer", r"\b(?:customer|customers|buyer|buyers|shopper|shoppers|phone number|email address|contact details|profile)\b"),
-    ("sales", r"\b(?:revenue|sales|selling|sold|best-selling|bestselling|order|orders|trend|trends|gmv|refund|refunds)\b"),
+    ("customer", r"\b(?:customer|customers|buyer|buyers|shopper|shoppers|phone number|email address|contact details|profile|cust[-_ ]?\d+)\b"),
+    ("sales", r"\b(?:revenue|sales|sell|sells|selling|sold|best-selling|bestselling|order|orders|trend|trends|gmv|refund|refunds)\b"),
     ("inventory", r"\b(?:stock|inventory|warehouse|available|availability|supply|reorder(?:ing|ed)?|restock(?:ing|ed)?|low stock|running low)\b"),
 ]
 _COMPILED = [(intent, re.compile(pattern, re.IGNORECASE)) for intent, pattern in _INTENT_PATTERNS]

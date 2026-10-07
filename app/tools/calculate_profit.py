@@ -1,7 +1,7 @@
 from langchain_core.tools import tool
 
 from app.snowflake_client import query
-from app.tools._period import parse_period
+from app.tools._period import combined_window, parse_period
 from app.tools._text import has_word
 
 
@@ -12,10 +12,13 @@ def calculate_profit(question: str) -> str:
     q = question.lower()
     period = parse_period(q)
 
-    if has_word(q, "quarterly", "compare", "comparison", "quarters", "by quarter"):
-        # Quarter-by-quarter comparison over the asked window (year to date when none was given).
-        window = period.sql if period.recognised else "AND o.order_placed_at >= DATE_TRUNC(year, CURRENT_DATE())"
-        label = period.label if period.recognised else "year to date"
+    if has_word(q, "quarterly", "compare", "comparison", "quarters", "by quarter", "vs", "versus"):
+        # Quarter-by-quarter comparison. "Q1 vs Q2" / "this quarter vs last quarter" cover both sides;
+        # otherwise the asked window, or year to date when none was given.
+        window, label = combined_window(q)
+        if window is None:
+            window = period.sql if period.recognised else "AND o.order_placed_at >= DATE_TRUNC(year, CURRENT_DATE())"
+            label = period.label if period.recognised else "year to date"
         rows = query(f"""
             SELECT
                 YEAR(o.order_placed_at) || ' Q' || QUARTER(o.order_placed_at) AS quarter,

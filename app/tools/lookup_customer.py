@@ -20,7 +20,7 @@ def lookup_customer(question: str) -> str:
     q_ids = re.sub(
         r'\b(?:order|orders|item|items|invoice|invoices|ticket|tickets|sku|skus|product|products)'
         r'(?:\s+(?:number|no\.?))?\s*(?:id\s*)?[:#]?\s*\d{1,6}\b', ' ', q)
-    id_match = (re.search(r'\bcust0*(\d{1,7})\b', q_ids)  # seeded ids look like CUST000042
+    id_match = (re.search(r'\bcust[-_\s]*0*(\d{1,7})\b', q_ids)  # seeded ids look like CUST000042
                 or re.search(r'\bcustomer[\s_]*(?:id|number|no\.?)?\s*[:#]?\s*(\d{1,7})\b', q_ids)
                 or re.search(r'(?:#|\bid\s*[:#]?)\s*(\d{1,7})\b', q_ids))
     wants_top = id_match is None and has_word(q, "top", "best", "most", "highest")
@@ -98,7 +98,7 @@ def lookup_customer(question: str) -> str:
         "please", "orders", "order", "profile", "named", "called", "give", "with", "and", "his", "her",
         "how", "many", "much", "have", "has", "does", "are", "there", "which", "where", "when", "from",
         "all", "our", "your", "their", "number", "count", "total", "phone", "email", "address", "you",
-        "status", "this", "that", "these", "those", "any", "some", "recent", "latest", "new", "active",
+        "status", "this", "that", "these", "those", "any", "some", "recent", "latest", "new", "active", "cust",
     }
     # "customers in Mumbai" names a place, not a person: drop the word after in/from/at/near.
     q_names = re.sub(r"\b(?:in|from|at|near|within)\s+\w+", " ", q)

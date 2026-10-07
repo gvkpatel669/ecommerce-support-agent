@@ -252,3 +252,21 @@ def test_profit_uses_period_window(monkeypatch):
     monkeypatch.setattr(profit_mod, "query", lambda sql, params=None: captured.append(sql) or [{"QUARTER": "2026 Q1", "REVENUE": 10, "COST": 5}])
     out = profit_mod.calculate_profit.invoke("compare profit by quarter")
     assert "DATE_TRUNC(year" in captured[0] and "2026 Q1" in out
+
+
+def test_cust_dash_id_is_not_a_name_search(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: calls.append((sql, params)) or [])
+    cust_mod.lookup_customer.invoke("CUST-42")
+    assert calls and "customer_id IN" in calls[0][0] and calls[0][1] == ("42", "CUST000042")
+    calls.clear()
+    cust_mod.lookup_customer.invoke("customer cust")
+    assert calls == []
+
+
+def test_profit_vs_comparison_covers_both_periods(monkeypatch):
+    import app.tools.calculate_profit as profit_mod
+    captured = []
+    monkeypatch.setattr(profit_mod, "query", lambda sql, params=None: captured.append(sql) or [{"QUARTER": "2026 Q1", "REVENUE": 10, "COST": 5}])
+    out = profit_mod.calculate_profit.invoke("compare profit Q1 vs Q2")
+    assert "'2026-01-01'" in captured[0] and "'2026-07-01'" in captured[0] and "Q1 2026 vs Q2 2026" in out
