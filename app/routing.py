@@ -21,6 +21,7 @@ _POLICY_RE = re.compile(
     r"customer support|support available|return window|warranty|terms and conditions)\b",
     re.IGNORECASE,
 )
+_ORDER_REF_RE = re.compile(r"\border\s*(?:(?:id|number|no\.?)\s*)?[:#]?\s*(?:[a-z]{2,4}-?)?\d+\b|\bord-?\d+\b", re.IGNORECASE)
 _HOWTO_RE = re.compile(r"\b(?:how (?:do|can|should|would) (?:i|we|one))\b", re.IGNORECASE)
 _AGGREGATE_RE = re.compile(
     r"\b(?:volume|rate|rates|total|totals|trend|trends|report|breakdown|top|average|avg|summary|"
@@ -48,6 +49,8 @@ def classify_intent(message: str) -> str:
     """Pure keyword routing. Returns one of: sales, inventory, profit, customer, general"""
     msg = message if isinstance(message, str) else ""
     aggregate = _AGGREGATE_RE.search(msg) is not None
+    if _ORDER_REF_RE.search(msg) and not re.search(r"\borders\b", msg, re.IGNORECASE):
+        return "general"  # a question about one specific order: there is no per-order tool
     if (_PERSONAL_RE.search(msg) or _POLICY_RE.search(msg)) and not aggregate:
         return "general"
     if _HOWTO_RE.search(msg) and not (aggregate or _DATA_RE.search(msg)):

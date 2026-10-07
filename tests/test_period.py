@@ -74,30 +74,30 @@ def test_numbers_that_are_not_years(q):
     assert not parse_period(q, col="c", today=TODAY).recognised
 
 
-def test_combined_window_spans_both_quarters():
-    from app.tools._period import combined_window
-    sql, label = combined_window("compare profit Q1 vs Q2", col="c", today=TODAY)
-    assert sql == "AND c >= '2026-01-01' AND c < '2026-07-01'" and label == "Q1 2026 vs Q2 2026"
-    assert combined_window("profit this month", col="c", today=TODAY) == (None, None)
-
-
-@pytest.mark.parametrize("q,expected_sql,label", [
-    ("profit this month vs last month", "AND c >= '2026-09-01' AND c < '2026-10-08'", "this month to date vs last month"),
-    ("today vs yesterday", "AND c >= '2026-10-06' AND c < '2026-10-08'", "today vs yesterday"),
-    ("profit last quarter vs Q1 2026", "AND c >= '2026-01-01' AND c < '2026-10-01'", "last quarter vs Q1 2026"),
-    ("profit q1 vs q2 2025", "AND c >= '2025-01-01' AND c < '2025-07-01'", "Q1 2025 vs Q2 2025"),
-    ("march vs april last year", "AND c >= '2025-03-01' AND c < '2025-05-01'", "March 2025 vs April 2025"),
-    ("nov vs dec 2025", "AND c >= '2025-11-01' AND c < '2026-01-01'", "November 2025 vs December 2025"),
-    ("march and april vs may", "AND c >= '2026-03-01' AND c < '2026-06-01'", "March–April 2026 vs May 2026"),
-    ("last 30 days vs previous 30 days", "AND c >= '2026-09-07'", "the last 30 days vs the last 30 days"),
+@pytest.mark.parametrize("q,labels", [
+    ("profit this month vs last month", ["this month to date", "last month"]),
+    ("today vs yesterday", ["today", "yesterday"]),
+    ("profit last quarter vs Q1 2026", ["last quarter (Q3 2026)", "Q1 2026"]),
+    ("march and april vs may", ["March–April 2026", "May 2026"]),
+    ("last 30 days vs previous 30 days", ["the last 30 days"]),
 ])
-def test_combined_windows(q, expected_sql, label):
-    from app.tools._period import combined_window
-    sql, got = combined_window(q, col="c", today=TODAY)
-    assert sql == expected_sql, (q, sql)
-    assert got == label
+def test_comparison_sides_relative(q, labels):
+    from app.tools._period import comparison_periods
+    assert [p.label for p in comparison_periods(q, col="c", today=TODAY)] == labels
 
 
+def test_comparison_sides_are_capped():
+    from app.tools._period import MAX_COMPARISON_SIDES, comparison_periods
+    q = " vs ".join(["q1", "q2", "q3", "q4"] * 50)
+    assert len(comparison_periods(q, col="c", today=TODAY)) == MAX_COMPARISON_SIDES
+
+
+@pytest.mark.parametrize("q,label", [
+    ("profit last quarter of the previous year", "Q4 2025"),
+    ("sales fy25-27", DEFAULT_LABEL),
+])
+def test_round11_windows(q, label):
+    assert parse_period(q, col="c", today=TODAY).label == label
 @pytest.mark.parametrize("q,needle,label", [
     ("sales during the last quarter of 2025", "'2025-10-01' AND c < '2026-01-01'", "Q4 2025"),
     ("since 2025", "AND c >= '2025-01-01'", "since 2025"),

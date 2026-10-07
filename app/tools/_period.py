@@ -205,12 +205,14 @@ def parse_period(question: str, col: str = "o.order_placed_at", today: date | No
             m = m if (start_year + 1) % 100 == second else None  # "2026-09" is a date, not a FY
         else:
             start_year = 2000 + int(m.group(1)) - (0 if m.group(2) else 1)   # "FY26" = 2025-26
+            if m.group(2) and (start_year + 1) % 100 != int(m.group(2)):
+                m = None  # "fy25-27" is not a financial year
         if m:
             s, e, label = _fy(start_year)
             return P(s, e, label)
 
     # Quarters
-    m = re.search(r"\blast\s+quarter\s+of\s+(?:(20\d\d)|(last|previous)\s+year)\b", q)
+    m = re.search(r"\blast\s+quarter\s+of\s+(?:the\s+)?(?:(20\d\d)|(last|previous)\s+year)\b", q)
     if m:
         year = int(m.group(1)) if m.group(1) else today.year - 1
         s, e = _quarter(year, 4)
@@ -219,7 +221,7 @@ def parse_period(question: str, col: str = "o.order_placed_at", today: date | No
         cur_q = (today.month - 1) // 3 + 1
         y, qn = (today.year, cur_q - 1) if cur_q > 1 else (today.year - 1, 4)
         s, e = _quarter(y, qn)
-        return P(s, e, "last quarter")
+        return P(s, e, f"last quarter (Q{qn} {y})")
     if re.search(r"\bthis\s+quarter\b", q):
         s, _ = _quarter(today.year, (today.month - 1) // 3 + 1)
         return P(s, tomorrow, "this quarter to date")
@@ -289,8 +291,14 @@ def _shift_years(d: date, n: int) -> date:
 _VS_RE = re.compile(r"\b(?:vs\.?|versus|compared\s+(?:to|with)|against)\b")
 
 
+MAX_COMPARISON_SIDES = 4
+
+
 def comparison_periods(question: str, col: str = "o.order_placed_at", today: date | None = None) -> list[Period]:
     """The periods named on each side of an "A vs B" question (empty unless at least two).
+
+    At most ``MAX_COMPARISON_SIDES`` distinct windows are returned (each side costs a warehouse
+    query), in the order they were named; repeated windows are dropped.
 
     A year (or "last year") written on one side also applies to a side that names none of
     its own ("q1 vs q2 2025" is Q1 2025 vs Q2 2025; "march vs april last year" is both 2025),
@@ -318,16 +326,11 @@ def comparison_periods(question: str, col: str = "o.order_placed_at", today: dat
         # Both sides collapsed onto one window: drop the shared year for the sides that assumed it.
         windows = [parse_period(p, col=col, today=today, default_year=None, may_is_month=may_is_month) for p in parts]
         windows = [w for w in windows if w.recognised]
-    return windows
+    distinct: list[Period] = []
+    for w in windows:
+        if all((w.start, w.end) != (d.start, d.end) for d in distinct):
+            distinct.append(w)
+        if len(distinct) == MAX_COMPARISON_SIDES:
+            break
+    return distinct
 
-
-def combined_window(question: str, col: str = "o.order_placed_at", today: date | None = None):
-    """The single window spanning every period of an "A vs B" question, or (None, None)."""
-    windows = comparison_periods(question, col=col, today=today)
-    if len(windows) < 2:
-        return None, None
-    starts = [w.start for w in windows if w.start is not None]
-    start = min(starts) if starts else None
-    end = None if any(w.end is None for w in windows) else max(w.end for w in windows)
-    combined = Period(start, end, " vs ".join(w.label for w in windows), col)
-    return combined.sql, combined.label

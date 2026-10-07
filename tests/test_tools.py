@@ -264,3 +264,18 @@ def test_profit_vs_comparison_runs_one_aggregate_per_side(monkeypatch):
     assert "'2026-05-01' AND o.order_placed_at < '2026-06-01'" in captured[0]
     assert "'2026-06-01' AND o.order_placed_at < '2026-07-01'" in captured[1]
     assert "May 2026 vs June 2026" in out and "  May 2026:" in out and "  June 2026:" in out
+
+
+def test_top_customer_with_year_is_a_ranking(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: calls.append(sql) or [])
+    cust_mod.lookup_customer.invoke("top customer 2025")
+    assert calls and "ORDER BY total_spent DESC" in calls[0] and "'2025-01-01'" in calls[0]
+
+
+def test_profit_comparison_is_capped(monkeypatch):
+    import app.tools.calculate_profit as profit_mod
+    captured = []
+    monkeypatch.setattr(profit_mod, "query", lambda sql, params=None: captured.append(sql) or [{"REVENUE": 1, "COST": 1}])
+    out = profit_mod.calculate_profit.invoke(" vs ".join(["q1", "q2", "q3", "q4"] * 20))
+    assert len(captured) == 4 and "first 4 periods only" in out

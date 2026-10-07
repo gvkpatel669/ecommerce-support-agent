@@ -21,6 +21,8 @@ def lookup_customer(question: str) -> str:
     q_ids = re.sub(
         r'\b(?:order|orders|item|items|invoice|invoices|ticket|tickets|sku|skus|product|products)'
         r'(?:\s+(?:number|no\.?))?\s*(?:id\s*)?[:#]?\s*\d{1,6}\b', ' ', q)
+    if has_word(q, "top", "best", "most", "highest", "biggest", "largest"):
+        q_ids = re.sub(r'\b20\d\d\b', ' ', q_ids)  # "top customer 2025" is a ranking for a year, not id 2025
     cust_match = re.search(r'\bcust[-_\s]*0*(\d{1,7})\b', q_ids)  # seeded ids look like CUST000042
     id_match = (cust_match
                 or re.search(r'\bcustomer[\s_]*(?:id|number|no\.?)?\s*[:#]?\s*(\d{1,7})\b', q_ids)
