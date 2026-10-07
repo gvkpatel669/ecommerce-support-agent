@@ -15,7 +15,11 @@ def lookup_customer(question: str) -> str:
     # An explicitly marked ID (#42, id 42, customer 42) always wins; only then do
     # "top/best/most" questions fall through to the ranking query ("top 5 customers").
     # A bare "#N" is a customer only when it is not an order/item/invoice number.
-    id_match = re.search(r'(?:\bid\s*#?|\bcustomer\s*#?|(?<!order )(?<!item )(?<!invoice )(?<!order#)#)\s*(\d{1,6})\b', q)
+    # Order/item/invoice numbers are removed first so "order #42" can never be read as a
+    # customer. Then "customer 42" / "customer id 42" / "customer #42" wins over a bare "#N".
+    q_ids = re.sub(r'\b(?:order|orders|item|items|invoice|invoices)(?:\s+number)?\s*(?:id\s*)?#?\s*\d{1,6}\b', ' ', q)
+    id_match = (re.search(r'\bcustomer\s*(?:id\s*)?#?\s*(\d{1,6})\b', q_ids)
+                or re.search(r'(?:#|\bid\s*#?)\s*(\d{1,6})\b', q_ids))
     wants_top = id_match is None and has_word(q, "top", "best", "most", "highest")
 
     if id_match:
@@ -89,7 +93,12 @@ def lookup_customer(question: str) -> str:
         "customer", "customers", "buyer", "buyers", "shopper", "account", "info", "details", "contact",
         "the", "for", "get", "find", "look", "lookup", "who", "what", "show", "list", "about", "tell",
         "please", "orders", "order", "profile", "named", "called", "give", "with", "and", "his", "her",
+        "how", "many", "much", "have", "has", "does", "are", "there", "which", "where", "when", "from",
+        "all", "our", "your", "their", "number", "count", "total", "phone", "email", "address", "you",
     }
+    # Aggregate questions ("how many customers do we have?") have no name to search for.
+    if has_word(q, "many", "count", "total") and not has_word(q, "named", "called"):
+        return "I can look up a customer by ID (e.g., #42) or name, or list 'top customers'; customer counts are not available here."
     name_words = [w for w in tokens(q) if len(w) > 2 and w not in stopwords]
 
     if name_words:

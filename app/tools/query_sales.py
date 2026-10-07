@@ -21,13 +21,21 @@ def query_sales(question: str) -> str:
         period_filter = "AND o.order_placed_at::DATE = CURRENT_DATE()"
     elif has("yesterday"):
         period_filter = "AND o.order_placed_at::DATE = CURRENT_DATE() - 1"
+    elif (m := re.search(r"\b(?:last|past)\s+(\d{1,3})\s+days?\b", q)):
+        period_filter = f"AND o.order_placed_at::DATE >= DATEADD(day, -{int(m.group(1))}, CURRENT_DATE())"
     elif has("week", "weekly"):
         period_filter = "AND o.order_placed_at::DATE >= DATEADD(day, -7, CURRENT_DATE())"
+    elif re.search(r"\blast\s+quarter\b", q):
+        period_filter = "AND o.order_placed_at >= DATE_TRUNC(quarter, DATEADD(quarter, -1, CURRENT_DATE())) AND o.order_placed_at < DATE_TRUNC(quarter, CURRENT_DATE())"
+    elif has("year", "yearly", "ytd", "annual"):
+        period_filter = "AND o.order_placed_at >= DATE_TRUNC(year, CURRENT_DATE())"
     elif has("month", "monthly"):
         period_filter = "AND o.order_placed_at::DATE >= DATEADD(month, -1, CURRENT_DATE())"
     elif has("q1", "quarter 1", "jan", "january", "feb", "february", "mar", "march"):
         period_filter = "AND o.order_placed_at >= '2026-01-01' AND o.order_placed_at < '2026-04-01'"
-    elif has("q2", "quarter 2", "apr", "april", "jun", "june") or re.search(r"\b(?:in|for|of|during|since|until)\s+may\b|\bmay\s+20\d\d\b", q):
+    elif re.search(r"\b(?:in|for|of|during|since|until)\s+may\b|\bmay\s+20\d\d\b", q) and not has("q2", "quarter 2"):
+        period_filter = "AND o.order_placed_at >= '2026-05-01' AND o.order_placed_at < '2026-06-01'"
+    elif has("q2", "quarter 2", "apr", "april", "jun", "june"):
         period_filter = "AND o.order_placed_at >= '2026-04-01' AND o.order_placed_at < '2026-07-01'"
     else:
         period_filter = "AND o.order_placed_at::DATE >= DATEADD(day, -30, CURRENT_DATE())"

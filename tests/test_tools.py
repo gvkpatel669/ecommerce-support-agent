@@ -1,3 +1,4 @@
+import pytest
 from app.tools import calculate_profit as profit_mod
 from app.tools import lookup_customer as cust_mod
 from app.tools import query_sales as sales_mod
@@ -71,7 +72,7 @@ def test_may_i_is_not_the_month_of_may(monkeypatch):
     assert "2026-04-01" not in captured[0]
     captured.clear()
     sales_mod.query_sales.invoke("sales in May")
-    assert "2026-04-01" in captured[0]
+    assert "2026-05-01" in captured[0]
 
 
 def test_name_search_strips_punctuation(monkeypatch):
@@ -128,4 +129,54 @@ def test_sales_may_as_verb_is_not_the_month(monkeypatch):
     assert "2026-04-01" not in captured[0]
     captured.clear()
     sales_mod.query_sales.invoke("revenue for May 2026")
-    assert "2026-04-01" in captured[0]
+    assert "2026-05-01" in captured[0]
+
+
+@pytest.mark.parametrize("question", [
+    "order#42 details for customer",
+    "order id 99 placed by which customer",
+    "order number #55 customer",
+    "orders #42",
+])
+def test_order_numbers_never_become_customer_ids(monkeypatch, question):
+    calls = []
+    monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: calls.append((sql, params)) or [])
+    cust_mod.lookup_customer.invoke(question)
+    assert not any("customer_id = %s" in sql for sql, _ in calls)
+
+
+@pytest.mark.parametrize("question,expected", [
+    ("order #42 for customer #7", "7"),
+    ("invoice #9 customer id 12", "12"),
+    ("customer#42", "42"),
+    ("customer 42", "42"),
+])
+def test_explicit_customer_ids_are_found(monkeypatch, question, expected):
+    calls = []
+    monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: calls.append((sql, params)) or [])
+    cust_mod.lookup_customer.invoke(question)
+    assert calls and calls[0][1] == (expected,)
+
+
+def test_customer_count_question_does_not_name_search(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cust_mod, "query", lambda sql, params=None: calls.append(sql) or [])
+    out = cust_mod.lookup_customer.invoke("How many customers do we have?")
+    assert calls == []
+    assert "counts are not available" in out
+
+
+def test_sales_period_windows(monkeypatch):
+    captured = []
+    monkeypatch.setattr(sales_mod, "query", lambda sql, params=None: captured.append(sql) or [{"TOTAL_ORDERS": 0}])
+    cases = {
+        "sales last 7 days": "DATEADD(day, -7",
+        "sales this year": "DATE_TRUNC(year",
+        "sales for last quarter": "DATEADD(quarter, -1",
+        "revenue in May 2026": "'2026-05-01'",
+        "revenue for Q2": "'2026-04-01'",
+    }
+    for q, needle in cases.items():
+        captured.clear()
+        sales_mod.query_sales.invoke(q)
+        assert needle in captured[0], q
